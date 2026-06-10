@@ -1,12 +1,11 @@
 # Changelog
 
-## Unreleased — v0.3.0 (the judge; coupled launch with stull)
+## v0.3.0 (2026-06-10) — the judge; coupled launch with stull
 
-In progress on the `judge` branch. The deterministic detector can't tell a
-precise term of art (`hook`) from a dilutable tic (`substrate`) — that's
-word-sense disambiguation, which static embeddings provably can't do (the
-gloss-coherence discriminator was measured and inverted). So one fenced LLM
-judgment enters the loop.
+The deterministic detector can't tell a precise term of art (`hook`) from a
+dilutable tic (`substrate`) — that's word-sense disambiguation, which static
+embeddings provably can't do (the gloss-coherence discriminator was measured
+and inverted). So one optional, fenced LLM judgment enters the loop.
 
 - `internal/judge`: the cell-facing contract — per-word strict-tool schema
   confining `demote_to` to the vetted ladder (select, never invent), a
@@ -28,9 +27,13 @@ judgment enters the loop.
   the real corpus.
 - Ablation test proves the gate earns its keep with a scripted judge — no
   LLM required to test the gate logic.
-- Remaining before release: the live `cell.go` wiring (stull import +
-  Anthropic SDK), gated on stull's public tag, then a real-corpus
-  calibration pass (does it drop `hook`, keep `substrate`?).
+- The fence is stull's `spec.Cell` used standalone, pinned to the public
+  `stull v0.1.0` (basanite is its first public consumer). A deterministic
+  proper-noun guard (`proper-nouns.txt`) suppresses project/tool names
+  before the fence. Off by default; the deterministic pipeline is unchanged
+  without a key. Validated live on the real corpus (hook/local/transcript
+  suppressed, substrate→layer, public/tier mixed) with hermetic httptest
+  coverage of the request shape and the fail-safe paths.
 
 ## v0.2.0 (2026-06-10)
 

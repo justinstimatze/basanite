@@ -2,11 +2,13 @@
 
 [![ci](https://github.com/justinstimatze/basanite/actions/workflows/ci.yml/badge.svg)](https://github.com/justinstimatze/basanite/actions/workflows/ci.yml)
 
-A deterministic, local, no-LLM tool that detects **vocabulary tics** in your
-Claude Code sessions' output — words the model reaches for reflexively
-(`load-bearing`, `spine`, …) until overuse debases them. It measures
-frequency drift over the JSONL transcripts, then injects awareness of each
-tic, plus a ranked ladder of alternatives, at turn start.
+A deterministic, local tool — **no LLM in the default path** — that detects
+**vocabulary tics** in your Claude Code sessions' output — words the model
+reaches for reflexively (`load-bearing`, `spine`, …) until overuse debases
+them. It measures frequency drift over the JSONL transcripts, then injects
+awareness of each tic, plus a ranked ladder of alternatives, at turn start.
+An optional, fenced LLM judge (off by default) handles the one judgment the
+deterministic stack can't — telling a term of art from a dilutable tic.
 
 Basanite is the dark stone an assayer streaks a sample against to judge it —
 a touchstone. Design rationale, including what was deliberately left out,
