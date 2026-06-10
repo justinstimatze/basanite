@@ -153,8 +153,12 @@ off by default; the deterministic pipeline runs unchanged without it.
 
 The detector so far catches tics by *shape* — a rate that rose, a word rare
 in general English, a frame that repeats. That misses two cases by
-construction, and a curated reference (the community "Claude Bingo" card of
-stock Claude phrases, shipped embedded) is the honest fix for both. It is a
+construction, and a curated reference is the honest fix for both. What ships
+embedded is a conservative, high-precision *sample* of the globally common
+leans — the assistant-register staples that actually recur in Claude Code
+transcripts, plus a few iconic signatures seeded from the community "Claude
+Bingo" card. It is biased to precision over coverage on purpose: a default
+everyone can ship with, extended locally for niche or personal leans. It is a
 *reference*, not a denylist: a seeded entry still has to clear the chronic
 rate and dispersion gates before it surfaces, and the output stays awareness,
 never prohibition.

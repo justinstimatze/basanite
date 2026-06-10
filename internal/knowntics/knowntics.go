@@ -1,8 +1,11 @@
 // Package knowntics holds the curated reference of words and phrases Claude
 // is known to lean on — the seed the chronic detector and the phrase track
-// match against. The built-in list ships embedded in the binary (drawn from
-// the community "Claude Bingo" card of stock phrases); users extend it with
-// their own known-tics.txt in the data dir or ~/.config/basanite.
+// match against. The built-in list ships embedded in the binary: a
+// conservative, high-precision sample of the globally common leans (the
+// assistant-register staples that recur in Claude Code transcripts, plus a
+// few iconic signatures seeded from the community "Claude Bingo" card). Users
+// extend it with their own known-tics.txt in the data dir or ~/.config/basanite,
+// which is where niche or personal leans belong.
 //
 // It is a reference, not a denylist. A seeded word still has to clear the
 // chronic detector's rate and dispersion gates, and a seeded phrase still has

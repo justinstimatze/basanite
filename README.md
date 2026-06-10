@@ -171,9 +171,13 @@ basanite report --judge=false    # deterministic-only, no API calls
 ### The known-tics reference (Claude Bingo)
 
 The derived signals (rising rate, rarity, repeated frame) catch tics from
-their *shape*. Some leans are known by reputation instead — the community
-"Claude Bingo" card is a crowd-sourced list of stock words and phrases. That
-card ships embedded as `known-tics.txt` and feeds two things:
+their *shape*. Some leans are known by reputation instead. basanite ships a
+conservative **sample of the globally common ones** — the assistant-register
+staples that recur across Claude Code transcripts (`you're absolutely right`,
+`worth noting`, `that said`) plus a few iconic signatures seeded from the
+community "Claude Bingo" card — embedded as `known-tics.txt`. It is kept
+high-precision on purpose; niche or personal leans go in your own list. It
+feeds two things:
 
 - **Known single words** become a third chronic admission route. The rarity
   route catches words rare in general English (`substrate`, `load-bearing`);

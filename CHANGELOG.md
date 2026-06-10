@@ -2,12 +2,16 @@
 
 ## Unreleased — the known-tics reference (Claude Bingo)
 
-A curated reference of words and phrases Claude is known to lean on, drawn
-from the community "Claude Bingo" card and shipped embedded in the binary.
+A curated reference of words and phrases Claude is known to lean on, shipped
+embedded in the binary as a conservative, high-precision **sample of the
+globally common ones** — the assistant-register staples that recur in Claude
+Code transcripts (`you're absolutely right`, `worth noting`, `that said`)
+plus a few iconic signatures seeded from the community "Claude Bingo" card.
 It complements the derived deterministic signals with crowd-sourced ground
 truth, and it stays a reference, not a denylist — a seeded entry still has
 to be one you're actually leaning on now before it surfaces, and the output
-stays awareness, never prohibition.
+stays awareness, never prohibition. Niche or personal leans go in a local
+`known-tics.txt`.
 
 - `internal/knowntics`: the embedded `known-tics.txt`, split into single-word
   lemmas and multi-word phrases, extensible with your own `known-tics.txt`
