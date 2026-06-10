@@ -21,6 +21,8 @@ import (
 	"github.com/justinstimatze/basanite/internal/detect"
 	"github.com/justinstimatze/basanite/internal/embed"
 	"github.com/justinstimatze/basanite/internal/judge"
+	"github.com/justinstimatze/basanite/internal/knowntics"
+	"github.com/justinstimatze/basanite/internal/phrase"
 	"github.com/justinstimatze/basanite/internal/pipeline"
 	"github.com/justinstimatze/basanite/internal/report"
 	"github.com/justinstimatze/basanite/internal/text"
@@ -110,7 +112,7 @@ func runScan(args []string) error {
 		return err
 	}
 
-	win, _ := pipeline.Pass(turns, recentStart, baselineStart)
+	win, _ := pipeline.Pass(turns, recentStart, baselineStart, nil)
 
 	fmt.Printf("corpus: %d turns / %dk tokens recent (%dd) · %d turns / %dk tokens baseline (%dd)\n\n",
 		win.RecentTurns, win.RecentTotal/1000, *recentDays, win.BaselineTurns, win.BaselineTotal/1000, *baselineDays)
@@ -361,6 +363,7 @@ func defaultReportOptions() pipeline.Options {
 		MaxUses: 50, MinUses: 5,
 		Threshold: 0.97, MinClean: 0.4,
 		ChronicTop: 4, MinChronicRate: 0.2, RarityFloor: 10.5,
+		PhraseTop: 4, MinPhraseCount: 5,
 	}
 }
 
@@ -385,6 +388,8 @@ func runReport(args []string) error {
 		chronicTop    = fs.Int("chronic", def.ChronicTop, "max chronic (steady high-rate) entries; 0 disables")
 		chronicRate   = fs.Float64("chronic-rate", def.MinChronicRate, "per-1k full-window rate floor for chronic candidates")
 		chronicRarity = fs.Float64("chronic-rarity", def.RarityFloor, "SemCor WordIC floor for the rare-word chronic route")
+		phraseTop     = fs.Int("phrases", def.PhraseTop, "max stock-phrase entries from the known-tics reference; 0 disables")
+		phraseMin     = fs.Int("phrase-min", def.MinPhraseCount, "minimum full-window occurrences for a phrase to surface")
 		useJudge      = fs.Bool("judge", true, "run the term-of-art judge when an API key is configured (default; --judge=false for the deterministic-only report)")
 		judgeModel    = fs.String("judge-model", "", "judge model id (default: a cheap haiku)")
 	)
@@ -394,6 +399,7 @@ func runReport(args []string) error {
 	def.Top, def.MinCount, def.MinRatio = *top, *minCount, *minRatio
 	def.MaxUses, def.Threshold, def.MinClean = *maxUses, *threshold, *minClean
 	def.ChronicTop, def.MinChronicRate, def.RarityFloor = *chronicTop, *chronicRate, *chronicRarity
+	def.PhraseTop, def.MinPhraseCount = *phraseTop, *phraseMin
 
 	// The judge is the default: the deterministic-only report is the one that
 	// confidently mis-suggests synonyms for terms of art (hook -> snare), the
@@ -442,6 +448,9 @@ func buildAndSave(dir, dataDir, out string, vetDays int, jdg judge.Judger, opts 
 		return nil, err
 	}
 	opts.ProperNouns = loadProperNouns(dataDir)
+	known := knowntics.Load(knownTicsPaths(dataDir)...)
+	opts.KnownTics = known.Words
+	opts.Phrases = phrase.New(known.Phrases)
 	now := time.Now()
 	turns, err := corpus.Read(dir, now.AddDate(0, 0, -vetDays))
 	if err != nil {
@@ -622,6 +631,17 @@ func loadProperNouns(dataDir string) map[string]bool {
 		f.Close()
 	}
 	return set
+}
+
+// knownTicsPaths returns the optional user known-tics lists that extend the
+// embedded reference: the data dir and ~/.config/basanite, mirroring the
+// proper-nouns lookup. Absent files are skipped by knowntics.Load.
+func knownTicsPaths(dataDir string) []string {
+	paths := []string{filepath.Join(dataDir, "known-tics.txt")}
+	if home, err := os.UserHomeDir(); err == nil {
+		paths = append(paths, filepath.Join(home, ".config", "basanite", "known-tics.txt"))
+	}
+	return paths
 }
 
 // loadWordNet opens the dict files plus the IC table when present (its

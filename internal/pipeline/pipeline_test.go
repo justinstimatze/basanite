@@ -9,6 +9,7 @@ import (
 
 	"github.com/justinstimatze/basanite/internal/corpus"
 	"github.com/justinstimatze/basanite/internal/embed"
+	"github.com/justinstimatze/basanite/internal/phrase"
 	"github.com/justinstimatze/basanite/internal/report"
 	"github.com/justinstimatze/basanite/internal/text"
 	"github.com/justinstimatze/basanite/internal/wordnet"
@@ -74,7 +75,7 @@ func TestPassMatchesWholeTurnTokenization(t *testing.T) {
 	turns := dogTurns(now)
 	recentStart := now.AddDate(0, 0, -7)
 	baselineStart := recentStart.AddDate(0, 0, -14)
-	w, sents := Pass(turns, recentStart, baselineStart)
+	w, sents := Pass(turns, recentStart, baselineStart, nil)
 
 	// the token-preserving property: window totals must equal what
 	// whole-turn tokenization produces
@@ -258,6 +259,133 @@ func rareLoader(t *testing.T) VectorLoader {
 	}
 	return func(vocab map[string]bool) (*embed.Table, error) {
 		return embed.Load(path, vocab)
+	}
+}
+
+// steadyDogTurns spreads "dog" evenly across both scan windows and three
+// projects with NO genitive frame: a steady, dispersed rate that is neither a
+// riser (ratio ~1) nor frame-shaped. Its only handle is the curated known-tics
+// route — the calibration that the bingo reference catches common-English
+// leans the rarity route structurally can't.
+func steadyDogTurns(now time.Time) []corpus.Turn {
+	mk := func(daysAgo int, project, text string) corpus.Turn {
+		return corpus.Turn{Time: now.AddDate(0, 0, -daysAgo), Project: project, Text: text}
+	}
+	return []corpus.Turn{
+		mk(1, "alpha", "The hungry dog barked loudly across the quiet yard fence today."),
+		mk(3, "beta", "A stray dog chased several pigeons toward the empty park bench."),
+		mk(5, "gamma", "Another clever dog wandered slowly past the garden gate this morning."),
+		mk(9, "alpha", "That muddy dog dragged a soggy leash across the wet kitchen floor."),
+		mk(12, "beta", "The shaggy dog opened the heavy cellar door with a damp nose."),
+		mk(16, "gamma", "One spotted dog barked sharply before the early morning walk began."),
+	}
+}
+
+// The known-tics route: a steady, unframed, common-English word the rarity and
+// frame routes both miss is admitted only because it's on the curated list,
+// and the entry is labelled as such.
+func TestBuildChronicKnownRoute(t *testing.T) {
+	now := time.Now()
+	opts := Options{
+		RecentDays: 7, BaselineDays: 14,
+		Top: 8, MinCount: 3, MinRatio: 2.0,
+		MaxUses: 50, MinUses: 5,
+		Threshold: 0.97, MinClean: 0.4,
+		// RarityFloor above any fixture WordIC so the rarity route can't admit
+		// dog; the turns are unframed so the frame route can't either.
+		ChronicTop: 4, MinChronicRate: 0.3, RarityFloor: 99,
+	}
+
+	// without the reference, dog has no admission handle at all
+	bare, err := Build(steadyDogTurns(now), loadTestWN(t), testLoader(t), nil, now, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasEntry(bare, "dog") {
+		t.Fatal("precondition: steady unframed common word must not surface without the reference")
+	}
+
+	// with dog on the curated list, the known route admits it
+	opts.KnownTics = map[string]bool{"dog": true}
+	rep, err := Build(steadyDogTurns(now), loadTestWN(t), testLoader(t), nil, now, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := entry(rep, "dog")
+	if e == nil {
+		t.Fatalf("known-tics route did not admit dog: %+v", rep.Entries)
+	}
+	if e.Kind != "chronic" || !e.Known || e.Rarity != 0 || e.FrameFrac >= 0.25 {
+		t.Errorf("dog should be a known-route chronic entry, not rarity/frame: %+v", e)
+	}
+}
+
+// The phrase track: a curated stock phrase repeated across the corpus surfaces
+// as an awareness-only entry, ladderless, even though its words are
+// individually invisible to the token detector.
+func TestBuildPhraseTrack(t *testing.T) {
+	now := time.Now()
+	mk := func(daysAgo int, project, text string) corpus.Turn {
+		return corpus.Turn{Time: now.AddDate(0, 0, -daysAgo), Project: project, Text: text}
+	}
+	turns := []corpus.Turn{
+		mk(1, "alpha", "I want to honor that, and the garden gate stayed open all morning."),
+		mk(3, "beta", "Honestly, I want to honor that pause before the park bench fills up."),
+		mk(5, "gamma", "I want to honor that quiet yard where the pigeons gather at dawn."),
+		mk(9, "alpha", "Still, I want to honor that slow walk past the cellar door each day."),
+		mk(12, "beta", "I want to honor that careful leash work across the wet kitchen floor."),
+	}
+	pm := phrase.New([]string{"I want to honor that"})
+	rep, err := Build(turns, loadTestWN(t), testLoader(t), nil, now, Options{
+		RecentDays: 7, BaselineDays: 14,
+		Top: 8, MinCount: 99, MinRatio: 2.0, // MinCount high so no word entries compete
+		MaxUses: 50, MinUses: 5,
+		Threshold: 0.97, MinClean: 0.4,
+		Phrases: pm, PhraseTop: 4, MinPhraseCount: 3,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := entry(rep, "i want to honor that")
+	if e == nil {
+		t.Fatalf("phrase track did not surface the stock phrase: %+v", rep.Entries)
+	}
+	if e.Kind != "phrase" || len(e.Ladder) != 0 || e.RecentCount != 5 {
+		t.Errorf("phrase entry malformed: %+v", e)
+	}
+	if got := e.Rate; got <= 0 {
+		t.Errorf("phrase entry must carry its full-window rate, got %f", got)
+	}
+}
+
+// The phrase track is decided before the vector load, so a phrase-only corpus
+// must surface its phrase without ever scanning the vector table.
+func TestBuildPhraseSkipsVectors(t *testing.T) {
+	now := time.Now()
+	mk := func(daysAgo int, project, text string) corpus.Turn {
+		return corpus.Turn{Time: now.AddDate(0, 0, -daysAgo), Project: project, Text: text}
+	}
+	turns := []corpus.Turn{
+		mk(1, "alpha", "Take your time with the quiet yard and the open garden gate."),
+		mk(3, "beta", "Take your time before the park bench near the cellar door fills."),
+		mk(5, "gamma", "Take your time across the wet kitchen floor with the soggy leash."),
+	}
+	loader := func(map[string]bool) (*embed.Table, error) {
+		t.Fatal("vector loader called for a phrase-only corpus")
+		return nil, nil
+	}
+	rep, err := Build(turns, loadTestWN(t), loader, nil, now, Options{
+		RecentDays: 7, BaselineDays: 14,
+		Top: 8, MinCount: 99, MinRatio: 2.0,
+		MaxUses: 50, MinUses: 5,
+		Threshold: 0.97, MinClean: 0.4,
+		Phrases: phrase.New([]string{"take your time"}), PhraseTop: 4, MinPhraseCount: 3,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry(rep, "take your time") == nil {
+		t.Fatalf("phrase-only corpus produced no phrase entry: %+v", rep.Entries)
 	}
 }
 

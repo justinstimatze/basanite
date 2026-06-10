@@ -1,0 +1,46 @@
+# known-tics — a curated reference of words and phrases Claude is known to
+# lean on, seeding the chronic detector (single words) and the phrase track
+# (multi-word). Drawn from the community "Claude Bingo" card of stock phrases.
+#
+# Format mirrors proper-nouns.txt: one entry per line, '#' comments, blank
+# lines ignored. A line with a space is a phrase, matched verbatim against the
+# surface word stream; anything else is a single word, lemmatized to match
+# corpus tokens. Extend it with your own known-tics.txt in the data dir or
+# ~/.config/basanite — later files add to this list, never replace it.
+#
+# These are a *reference*, not a denylist: a seeded entry still has to be
+# something you're actually leaning on now (steady rate, dispersed) before it
+# surfaces, and the output stays awareness, never prohibition.
+
+# --- single words ---
+load-bearing
+substrate
+register
+texture
+calibration
+threshold
+surface
+frame
+reframe
+honor
+liminal
+scaffold
+
+# --- phrases ---
+that's not nothing
+the thing underneath the thing
+i want to honor that
+sitting with you in this
+i'm not going anywhere
+take your time
+i appreciate you sharing that
+pull back to look at you
+i want to be careful here
+that's not a failure
+let's stay with that
+both can be true
+what do you need right now
+i won't pretend
+doing a lot of work
+that tracks
+i hear you

@@ -23,15 +23,19 @@ type Rung struct {
 // Entry is one flagged word with its vetted, IC-ordered ladder. Kind
 // "riser" (or empty, for reports from older versions) means recent
 // frequency rose against the trailing baseline; "chronic" means a steady
-// high rate with tic evidence (frame repetition or context clustering).
+// high rate with tic evidence (frame repetition, rarity, or a curated
+// known-tics match); "phrase" is an awareness-only stock-phrase entry with
+// no ladder, where Lemma holds the phrase text.
 type Entry struct {
 	Kind         string  `json:"kind,omitempty"`
 	Lemma        string  `json:"lemma"`
 	RecentCount  int     `json:"recent_count,omitempty"`
 	Ratio        float64 `json:"ratio,omitempty"`
-	Rate         float64 `json:"rate,omitempty"`       // per-1k rate (full window for chronic)
+	Rate         float64 `json:"rate,omitempty"`       // per-1k rate (full window for chronic/phrase)
 	FrameFrac    float64 `json:"frame_frac,omitempty"` // share of uses in the "<det> X of" frame
 	Rarity       float64 `json:"rarity,omitempty"`     // WordIC, set when the rare-word route flagged it
+	Known        bool    `json:"known,omitempty"`      // admitted via the curated known-tics route
+	Projects     int     `json:"projects,omitempty"`   // distinct projects the phrase appears in
 	JudgeRole    string  `json:"judge_role,omitempty"` // tic|mixed when the LLM gate ran (term_of_art entries are dropped, never stored)
 	JudgeNote    string  `json:"judge_note,omitempty"` // the gate's one-clause awareness payload
 	DemoteTo     string  `json:"demote_to,omitempty"`  // the gate's chosen rung, when it named one
@@ -134,9 +138,16 @@ func (r *Report) Render() string {
 		return ""
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "basanite — words you lean on in your output (awareness, not prohibition; the weaker rung is often the truer one):\n")
+	fmt.Fprintf(&b, "basanite — words and phrases you lean on in your output (awareness, not prohibition; the weaker rung is often the truer one):\n")
 	rendered := 0
 	for _, e := range r.Entries {
+		// Phrase entries carry no ladder — there's no synonym for a stock
+		// phrase, only the awareness that you keep reaching for it.
+		if e.Kind == "phrase" {
+			fmt.Fprintf(&b, "  %q (%s)\n", e.Lemma, e.note())
+			rendered++
+			continue
+		}
 		trimmed := trimLadder(e.Ladder, e.Lemma)
 		if len(trimmed) < 2 {
 			continue // nothing below the target: no demotion to offer
@@ -164,6 +175,9 @@ func (r *Report) Render() string {
 
 // note is the per-entry evidence summary in the rendered line.
 func (e Entry) note() string {
+	if e.Kind == "phrase" {
+		return fmt.Sprintf("a stock phrase, %d× this window — reach for a fresh one", e.RecentCount)
+	}
 	if e.Kind != "chronic" {
 		return fmt.Sprintf("%.1f× your baseline", e.Ratio)
 	}
@@ -173,6 +187,9 @@ func (e Entry) note() string {
 	}
 	if e.Rarity > 0 {
 		note += ", uncommon in general English"
+	}
+	if e.Known {
+		note += ", a common Claude lean"
 	}
 	return note
 }
