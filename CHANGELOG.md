@@ -13,10 +13,12 @@ to be one you're actually leaning on now before it surfaces, and the output
 stays awareness, never prohibition. Niche or personal leans go in a local
 `known-tics.txt`.
 
-- `internal/knowntics`: the embedded `known-tics.txt`, split into single-word
-  lemmas and multi-word phrases, extensible with your own `known-tics.txt`
-  in the data dir or `~/.config/basanite` (later files add, never replace) —
-  mirroring the `proper-nouns.txt` suppress list, inverted.
+- `internal/knowntics`: the reference is a single **user-owned** list. The
+  embedded content is a *starter seed* — on first run it's written to
+  `~/.config/basanite/known-tics.txt`, and from then on only that file is
+  read. It's yours to curate: entries accrete and fall out over time (a
+  model's tells age out), and nothing upstream re-merges what you deleted.
+  Single-word lines feed the chronic detector; spaced lines are phrases.
 - **Known-tics route**: a third chronic admission route. The rarity route
   catches words rare in general English (`substrate`, `load-bearing`); the
   known route catches *common*-English leans it structurally can't see

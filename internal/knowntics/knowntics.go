@@ -1,29 +1,29 @@
-// Package knowntics holds the curated reference of words and phrases Claude
-// is known to lean on — the seed the chronic detector and the phrase track
-// match against. The built-in list ships embedded in the binary: a
-// conservative, high-precision sample of the globally common leans (the
-// assistant-register staples that recur in Claude Code transcripts, plus a
-// few iconic signatures seeded from the community "Claude Bingo" card). Users
-// extend it with their own known-tics.txt in the data dir or ~/.config/basanite,
-// which is where niche or personal leans belong.
+// Package knowntics holds the reference of words and phrases Claude is known
+// to lean on — the seed the chronic detector and the phrase track match
+// against.
 //
-// It is a reference, not a denylist. A seeded word still has to clear the
-// chronic detector's rate and dispersion gates, and a seeded phrase still has
-// to be one you're actually repeating, before either surfaces — and the
-// output stays awareness, never prohibition (see DESIGN.md).
+// The model is a single user-owned list, not a baked-in one. The embedded
+// content is a *starter seed*: on first run it is written to the user's
+// known-tics.txt, and from then on that file is the only source read. So the
+// list is the user's to curate — entries accrete and fall out over time (a tic
+// that was a given model's tell stops mattering when the model changes), and
+// nothing upstream silently re-adds what the user deleted.
 package knowntics
 
 import (
 	"bufio"
 	_ "embed"
+	"errors"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/justinstimatze/basanite/internal/text"
 )
 
 //go:embed known-tics.txt
-var builtin string
+var seed string
 
 // Set is the parsed reference: single-word lemmas the chronic detector can
 // admit as a third route, and the multi-word phrases the phrase track counts.
@@ -32,25 +32,38 @@ type Set struct {
 	Phrases []string        // multi-word phrases, lowercased, surface form
 }
 
-// Load parses the embedded list, then merges any user lists found at the
-// given extra paths (later files extend, never replace). Missing or unreadable
-// files are skipped — a personal list is optional.
-func Load(extra ...string) *Set {
-	s := &Set{Words: map[string]bool{}}
-	seen := map[string]bool{}
-	s.parse(builtin, seen)
-	for _, p := range extra {
-		if b, err := os.ReadFile(p); err == nil {
-			s.parse(string(b), seen)
+// Seed is the embedded starter list — the bytes written to a fresh install's
+// known-tics.txt. Exposed for tooling and tests.
+func Seed() string { return seed }
+
+// Load reads the user-owned known-tics list at path, creating it from the
+// embedded seed the first time so the list becomes the user's to curate. A
+// blank path, or any create/read error, falls back to the embedded seed
+// parsed in memory: the feature degrades to the starter set, it never
+// vanishes. The bool reports whether the file was just seeded (first run), so
+// a caller can point the user at their new editable list.
+func Load(path string) (*Set, bool) {
+	seeded := false
+	if path != "" {
+		if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err == nil {
+				if os.WriteFile(path, []byte(seed), 0o644) == nil {
+					seeded = true
+				}
+			}
+		}
+		if b, err := os.ReadFile(path); err == nil {
+			return parse(string(b)), seeded
 		}
 	}
-	return s
+	return parse(seed), seeded
 }
 
 // parse reads one list body. A line with an interior space is a phrase; the
-// rest are single words, lemmatized and lowercased to match corpus tokens. The
-// seen set dedups phrases across the builtin and user lists.
-func (s *Set) parse(body string, seen map[string]bool) {
+// rest are single words, lemmatized and lowercased to match corpus tokens.
+func parse(body string) *Set {
+	s := &Set{Words: map[string]bool{}}
+	seen := map[string]bool{}
 	sc := bufio.NewScanner(strings.NewReader(body))
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
@@ -67,4 +80,5 @@ func (s *Set) parse(body string, seen map[string]bool) {
 		}
 		s.Words[text.Lemma(line)] = true
 	}
+	return s
 }

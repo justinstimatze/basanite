@@ -422,9 +422,21 @@ func runReport(args []string) error {
 		}
 	}
 
+	// Note a first-run seed of the known-tics list before the build creates
+	// it, so the user learns where their editable copy now lives.
+	firstRun := false
+	if p := knownTicsPath(); p != "" {
+		if _, err := os.Stat(p); os.IsNotExist(err) {
+			firstRun = true
+		}
+	}
+
 	rep, err := buildAndSave(*dir, *dataDir, *out, *vetDays, jdg, def)
 	if err != nil {
 		return err
+	}
+	if firstRun {
+		fmt.Printf("seeded your editable known-tics list at %s\n", knownTicsPath())
 	}
 	fmt.Printf("report: %d entries (judge %s)\n", len(rep.Entries), judgeStatus)
 	if s := rep.Render(); s != "" {
@@ -448,7 +460,7 @@ func buildAndSave(dir, dataDir, out string, vetDays int, jdg judge.Judger, opts 
 		return nil, err
 	}
 	opts.ProperNouns = loadProperNouns(dataDir)
-	known := knowntics.Load(knownTicsPaths(dataDir)...)
+	known, _ := knowntics.Load(knownTicsPath())
 	opts.KnownTics = known.Words
 	opts.Phrases = phrase.New(known.Phrases)
 	now := time.Now()
@@ -633,15 +645,16 @@ func loadProperNouns(dataDir string) map[string]bool {
 	return set
 }
 
-// knownTicsPaths returns the optional user known-tics lists that extend the
-// embedded reference: the data dir and ~/.config/basanite, mirroring the
-// proper-nouns lookup. Absent files are skipped by knowntics.Load.
-func knownTicsPaths(dataDir string) []string {
-	paths := []string{filepath.Join(dataDir, "known-tics.txt")}
-	if home, err := os.UserHomeDir(); err == nil {
-		paths = append(paths, filepath.Join(home, ".config", "basanite", "known-tics.txt"))
+// knownTicsPath is the user-owned known-tics list: ~/.config/basanite/known-tics.txt,
+// seeded from the embedded starter on first run and the user's to curate after.
+// "" when there is no home dir, in which case knowntics.Load uses the seed
+// in memory.
+func knownTicsPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
 	}
-	return paths
+	return filepath.Join(home, ".config", "basanite", "known-tics.txt")
 }
 
 // loadWordNet opens the dict files plus the IC table when present (its

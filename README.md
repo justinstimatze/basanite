@@ -193,11 +193,13 @@ feeds two things:
   the awareness that you keep reaching for it.
 
 It stays a reference, not a denylist: a seeded entry only surfaces when
-you're actually leaning on it now. Extend it with your own `known-tics.txt`
-(data dir or `~/.config/basanite`, one entry per line, `#` comments; a line
-with a space is a phrase, otherwise a single word) — later files add to the
-embedded list, never replace it. `--phrases N` / `--phrase-min N` tune the
-phrase track; `--phrases=0` disables it.
+you're actually leaning on it now. And it's a *seed*, not a baked-in list —
+on first run the starter set is written to `~/.config/basanite/known-tics.txt`,
+and from then on that file is the only one read. It's yours to curate: add
+your own leans, delete ones that stop mattering as models change. Nothing
+upstream re-applies over your edits (one entry per line, `#` comments; a line
+with a space is a phrase, otherwise a single word). `--phrases N` /
+`--phrase-min N` tune the phrase track; `--phrases=0` disables it.
 
 ### The hook
 

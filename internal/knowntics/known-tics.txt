@@ -1,22 +1,24 @@
-# known-tics — a conservative *shipping sample* of words and phrases Claude is
-# globally known to lean on, biased toward the ones that actually recur in
-# Claude Code transcripts. Seeded from the community "Claude Bingo" card and
-# the well-worn assistant-register staples. Kept high-precision on purpose:
-# this is a sensible default everyone can ship with, not an exhaustive list.
+# known-tics — words and phrases Claude is known to lean on. This is the
+# *starter seed*: on first run it is copied to ~/.config/basanite/known-tics.txt,
+# and from then on that file is the only one read — it's yours to curate. Add
+# your own leans; delete ones that stop mattering (a model's tells age out).
+# Nothing here is re-applied over your edits.
+#
+# It ships as a conservative, high-precision sample of the globally common
+# leans, biased toward the ones that recur in Claude Code transcripts. Seeded
+# from the assistant-register staples and the community "Claude Bingo" card.
 #
 # Format mirrors proper-nouns.txt: one entry per line, '#' comments, blank
 # lines ignored. A line with a space is a phrase, matched verbatim against the
 # surface word stream; anything else is a single word, lemmatized to match
-# corpus tokens. Extend it with your own known-tics.txt in the data dir or
-# ~/.config/basanite — later files add to this list, never replace it; that's
-# where the niche or personal leans belong.
+# corpus tokens.
 #
 # These are a *reference*, not a denylist: a seeded entry still has to be
 # something you're actually leaning on now (steady rate, dispersed) before it
 # surfaces, and the output stays awareness, never prohibition.
 
 # --- single words (distinctive Claude register; common-English leans like
-#     surface/frame/honor are deliberately left for your local list) ---
+#     surface/frame/honor are left out of the seed — add them if you want) ---
 load-bearing
 substrate
 calibration

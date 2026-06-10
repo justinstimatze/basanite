@@ -153,15 +153,19 @@ off by default; the deterministic pipeline runs unchanged without it.
 
 The detector so far catches tics by *shape* — a rate that rose, a word rare
 in general English, a frame that repeats. That misses two cases by
-construction, and a curated reference is the honest fix for both. What ships
-embedded is a conservative, high-precision *sample* of the globally common
-leans — the assistant-register staples that actually recur in Claude Code
-transcripts, plus a few iconic signatures seeded from the community "Claude
-Bingo" card. It is biased to precision over coverage on purpose: a default
-everyone can ship with, extended locally for niche or personal leans. It is a
-*reference*, not a denylist: a seeded entry still has to clear the chronic
-rate and dispersion gates before it surfaces, and the output stays awareness,
-never prohibition.
+construction, and a curated reference is the honest fix for both. The
+reference is a single **user-owned** list, not a baked-in one: what ships
+embedded is a *starter seed* (a conservative, high-precision sample of the
+globally common leans — the assistant-register staples that recur in Claude
+Code transcripts, plus a few iconic signatures from the "Claude Bingo" card),
+and on first run it is copied to the user's `known-tics.txt`, the only file
+read thereafter. This is the deliberate choice over a baked-in list plus a
+user override: two lists meant the seed silently re-added what the user
+deleted, so a lean could never age out — and they do age out, as the model
+underneath changes. One list the user owns lets entries accrete and fall away.
+It is a *reference*, not a denylist: a seeded entry still has to clear the
+chronic rate and dispersion gates before it surfaces, and the output stays
+awareness, never prohibition.
 
 - **Common-English single-word leans.** `substrate` and `load-bearing` are
   rare in general English, so the rarity route sees them. `surface`,
