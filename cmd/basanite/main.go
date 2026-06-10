@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -19,6 +20,7 @@ import (
 	"github.com/justinstimatze/basanite/internal/corpus"
 	"github.com/justinstimatze/basanite/internal/detect"
 	"github.com/justinstimatze/basanite/internal/embed"
+	"github.com/justinstimatze/basanite/internal/judge"
 	"github.com/justinstimatze/basanite/internal/pipeline"
 	"github.com/justinstimatze/basanite/internal/report"
 	"github.com/justinstimatze/basanite/internal/text"
@@ -383,6 +385,8 @@ func runReport(args []string) error {
 		chronicTop    = fs.Int("chronic", def.ChronicTop, "max chronic (steady high-rate) entries; 0 disables")
 		chronicRate   = fs.Float64("chronic-rate", def.MinChronicRate, "per-1k full-window rate floor for chronic candidates")
 		chronicRarity = fs.Float64("chronic-rarity", def.RarityFloor, "SemCor WordIC floor for the rare-word chronic route")
+		judgeOn       = fs.Bool("judge", false, "gate entries through the term-of-art LLM judge (needs ANTHROPIC_API_KEY)")
+		judgeModel    = fs.String("judge-model", "", "judge model id (default: a cheap haiku)")
 	)
 	fs.Parse(args)
 
@@ -391,7 +395,20 @@ func runReport(args []string) error {
 	def.MaxUses, def.Threshold, def.MinClean = *maxUses, *threshold, *minClean
 	def.ChronicTop, def.MinChronicRate, def.RarityFloor = *chronicTop, *chronicRate, *chronicRarity
 
-	rep, err := buildAndSave(*dir, *dataDir, *out, *vetDays, def)
+	var jdg judge.Judger
+	if *judgeOn {
+		p, err := report.StateDir()
+		if err != nil {
+			return err
+		}
+		cj, err := judge.New(p, *dataDir, *judgeModel)
+		if err != nil {
+			return err // -judge was explicit; a missing key is a hard error here
+		}
+		jdg = cj
+	}
+
+	rep, err := buildAndSave(*dir, *dataDir, *out, *vetDays, jdg, def)
 	if err != nil {
 		return err
 	}
@@ -403,8 +420,8 @@ func runReport(args []string) error {
 }
 
 // buildAndSave runs the offline pipeline and persists the report. out ==
-// "" means the default state path.
-func buildAndSave(dir, dataDir, out string, vetDays int, opts pipeline.Options) (*report.Report, error) {
+// "" means the default state path; jdg nil disables the term-of-art gate.
+func buildAndSave(dir, dataDir, out string, vetDays int, jdg judge.Judger, opts pipeline.Options) (*report.Report, error) {
 	if out == "" {
 		p, err := report.Path()
 		if err != nil {
@@ -416,12 +433,13 @@ func buildAndSave(dir, dataDir, out string, vetDays int, opts pipeline.Options) 
 	if err != nil {
 		return nil, err
 	}
+	opts.ProperNouns = loadProperNouns(dataDir)
 	now := time.Now()
 	turns, err := corpus.Read(dir, now.AddDate(0, 0, -vetDays))
 	if err != nil {
 		return nil, err
 	}
-	rep, err := pipeline.Build(turns, wn, gloveLoader(dataDir), now, opts)
+	rep, err := pipeline.Build(turns, wn, gloveLoader(dataDir), jdg, now, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -476,7 +494,13 @@ func runRefresh(args []string) error {
 	f.Close()
 	defer os.Remove(lock)
 
-	rep, err := buildAndSave(*dir, *dataDir, path, defaultVetDays, defaultReportOptions())
+	// best-effort gate: refresh runs unattended, so a missing key is not an
+	// error here — it just means the report regenerates un-gated.
+	var jdg judge.Judger
+	if cj, err := judge.New(stateDir, *dataDir, ""); err == nil {
+		jdg = cj
+	}
+	rep, err := buildAndSave(*dir, *dataDir, path, defaultVetDays, jdg, defaultReportOptions())
 	status := fmt.Sprintf("%s ok: %d entries\n", time.Now().Format(time.RFC3339), entryCount(rep))
 	if err != nil {
 		status = fmt.Sprintf("%s error: %v\n", time.Now().Format(time.RFC3339), err)
@@ -562,6 +586,35 @@ func runHook(args []string) error {
 // rejects anything that could traverse paths or surprise the marker
 // scheme — the id becomes part of a file name.
 var validSessionID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`).MatchString
+
+// loadProperNouns reads the suppress-list — known project/tool names that a
+// frequency+sense pass mistakes for tics (e.g. the word "calque" when it's a
+// project, not the linguistics term). One lemma per line, '#' comments; read
+// from proper-nouns.txt in the data dir and ~/.config/basanite. Lemmatized
+// and lowercased to match the corpus tokens.
+func loadProperNouns(dataDir string) map[string]bool {
+	set := map[string]bool{}
+	paths := []string{filepath.Join(dataDir, "proper-nouns.txt")}
+	if home, err := os.UserHomeDir(); err == nil {
+		paths = append(paths, filepath.Join(home, ".config", "basanite", "proper-nouns.txt"))
+	}
+	for _, p := range paths {
+		f, err := os.Open(p)
+		if err != nil {
+			continue
+		}
+		sc := bufio.NewScanner(f)
+		for sc.Scan() {
+			line := strings.TrimSpace(sc.Text())
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			set[text.Lemma(strings.ToLower(line))] = true
+		}
+		f.Close()
+	}
+	return set
+}
 
 // loadWordNet opens the dict files plus the IC table when present (its
 // absence just means ladders order by word frequency).

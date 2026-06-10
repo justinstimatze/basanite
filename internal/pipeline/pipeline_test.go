@@ -116,7 +116,7 @@ func TestCandidates(t *testing.T) {
 
 func TestBuildEndToEnd(t *testing.T) {
 	now := time.Now()
-	rep, err := Build(dogTurns(now), loadTestWN(t), testLoader(t), now, Options{
+	rep, err := Build(dogTurns(now), loadTestWN(t), testLoader(t), nil, now, Options{
 		RecentDays: 7, BaselineDays: 14,
 		Top: 8, MinCount: 5, MinRatio: 2.0,
 		MaxUses: 50, MinUses: 5,
@@ -168,7 +168,7 @@ func chronicTurns(now time.Time) []corpus.Turn {
 
 func TestBuildChronicEntry(t *testing.T) {
 	now := time.Now()
-	rep, err := Build(chronicTurns(now), loadTestWN(t), testLoader(t), now, Options{
+	rep, err := Build(chronicTurns(now), loadTestWN(t), testLoader(t), nil, now, Options{
 		RecentDays: 7, BaselineDays: 14,
 		Top: 8, MinCount: 3, MinRatio: 2.0,
 		MaxUses: 50, MinUses: 5,
@@ -217,7 +217,7 @@ func TestBuildChronicRareWordRoute(t *testing.T) {
 	}
 	// fixture WordIC: load-bearing has SemCor tag count 1 of 16 total ->
 	// WordIC ~2.4; a floor of 2.0 admits it while dog (~1.3) stays out
-	rep, err := Build(turns, loadTestWN(t), rareLoader(t), now, Options{
+	rep, err := Build(turns, loadTestWN(t), rareLoader(t), nil, now, Options{
 		RecentDays: 7, BaselineDays: 14,
 		Top: 8, MinCount: 3, MinRatio: 2.0,
 		MaxUses: 50, MinUses: 5,
@@ -269,7 +269,7 @@ func TestBuildQuietWindowSkipsVectors(t *testing.T) {
 		t.Fatal("vector loader called for a riser-free corpus")
 		return nil, nil
 	}
-	rep, err := Build(nil, loadTestWN(t), loader, now, Options{
+	rep, err := Build(nil, loadTestWN(t), loader, nil, now, Options{
 		RecentDays: 7, BaselineDays: 14,
 		Top: 8, MinCount: 5, MinRatio: 2.0,
 		MaxUses: 50, MinUses: 5,

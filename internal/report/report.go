@@ -32,6 +32,9 @@ type Entry struct {
 	Rate         float64 `json:"rate,omitempty"`       // per-1k rate (full window for chronic)
 	FrameFrac    float64 `json:"frame_frac,omitempty"` // share of uses in the "<det> X of" frame
 	Rarity       float64 `json:"rarity,omitempty"`     // WordIC, set when the rare-word route flagged it
+	JudgeRole    string  `json:"judge_role,omitempty"` // tic|mixed when the LLM gate ran (term_of_art entries are dropped, never stored)
+	JudgeNote    string  `json:"judge_note,omitempty"` // the gate's one-clause awareness payload
+	DemoteTo     string  `json:"demote_to,omitempty"`  // the gate's chosen rung, when it named one
 	ClusterDelta float64 `json:"cluster_delta"`        // vs corpus baseline; >0 = tic-like
 	Uses         int     `json:"uses"`
 	Ladder       []Rung  `json:"ladder"` // weakest -> strongest, includes the lemma itself
@@ -146,7 +149,11 @@ func (r *Report) Render() string {
 			}
 			words = append(words, w)
 		}
-		fmt.Fprintf(&b, "  %s (%s): %s\n", e.Lemma, e.note(), strings.Join(words, " < "))
+		line := strings.Join(words, " < ")
+		if e.JudgeNote != "" {
+			line += " — " + e.JudgeNote
+		}
+		fmt.Fprintf(&b, "  %s (%s): %s\n", e.Lemma, e.note(), line)
 		rendered++
 	}
 	if rendered == 0 {

@@ -20,6 +20,7 @@ basanite trend <lemma>…  # weekly rate per lemma — the effectiveness check
 basanite ladder <word>…  # specificity ladder per sense, weakest → strongest
 basanite vet <word>…     # judge candidates against your own past sentences
 basanite report          # full pipeline (scan→vet→ladder) → state file, ~1 min
+                         #   add --judge to gate out terms of art (opt-in, needs a key)
 basanite refresh         # regenerate the state file if stale (SessionStart entry)
 basanite hook            # UserPromptSubmit entry: inject the report, ~4 ms
 basanite version
@@ -128,6 +129,37 @@ Context clustering is deliberately **not** an admission route: measured on
 real data, domain vocabulary legitimately clusters at the same delta as
 genuine tics, so it can't separate them.
 
+### The term-of-art judge (optional)
+
+Everything above is deterministic and offline. But the deterministic stack
+has one boundary it provably can't cross: telling a **dilutable tic**
+(`substrate` — reach for it loosely, a weaker word is often truer) from a
+**precise term of art** (`hook` — the Claude Code concept; `→ snare` would
+be actively wrong). That's word-sense disambiguation, and static embeddings
+are sense-blind (measured: the deterministic discriminator inverted, scoring
+`hook` *more* substitutable than `substrate`). So `report --judge` adds one
+fenced LLM judgment — and only that one.
+
+The deterministic detector hands each riser its vetted demote ladder and
+real sample sentences; the judge classifies `tic` / `term_of_art` / `mixed`
+and, for a tic, selects the truer rung **from that ladder only** — a strict
+tool schema confines it to the vetted set, so it can never invent a word, and
+a malformed or incoherent verdict fails safe to the un-gated entry.
+`term_of_art` words are dropped (no valid substitute); `mixed` words are kept
+with a per-sense note. The fence is [stull](https://github.com/justinstimatze/stull)'s
+`spec.Cell` used as a standalone fenced-oracle library.
+
+It is **off by default**, runs at report time (not per turn), needs
+`ANTHROPIC_API_KEY` (in the environment or a `.env` — see `.env.example`),
+and uses a cheap model with prompt caching. A `proper-nouns.txt` (data dir
+or `~/.config/basanite`) of your project/tool names is suppressed
+deterministically *before* the judge — a frequency+sense pass otherwise
+mistakes a project literally named `calque` for the common word.
+
+```
+basanite report --judge          # gate the report through the judge
+```
+
 ### The hook
 
 `report` composes the pipeline offline (one corpus read; risers with no
@@ -175,11 +207,17 @@ Nothing is redistributed in this repository. The binary looks for assets in
 
 ## Known limitations
 
-- Wrong-sense rungs can leak through the cloze filter (100d mean-pooled
-  vectors only discriminate senses so far). It is most visible for dev
-  jargon flagged by the rarity route — `hook`'s WordNet senses are fishing
-  and boxing, so its ladder reads accordingly. The demote-only render
-  hides most of the leakage; the rest is documented honesty.
+- Without `--judge`, wrong-sense rungs leak through the cloze filter (100d
+  mean-pooled vectors only discriminate senses so far) — most visibly for
+  dev jargon, where `hook`'s WordNet senses are fishing and boxing. The
+  demote-only render hides most of it; the judge suppresses the rest by
+  recognizing the term of art.
+- The judge is an LLM and is not deterministic across prompt wording —
+  tuning it to fix one word can perturb another (observed: a prompt edit to
+  catch project-name proper nouns regressed `local`). `temperature: 0`
+  makes a *cached* verdict stable, but the judgment remains a model call,
+  not a proof. Project-name proper nouns are handled deterministically by
+  `proper-nouns.txt`, not by the model.
 - The chronic stage needs frame or rarity evidence; a chronic tic that is
   a common English word used without a repeating frame won't be flagged.
 - Entries are capped (8 risers + 4 chronic per report) so the injection

@@ -1,2 +1,10 @@
 /basanite
 /data/
+
+# secrets — never commit; the judge reads ANTHROPIC_API_KEY from here
+.env
+.env.local
+
+# local dev bridge to sibling modules — never commit
+go.work
+go.work.sum

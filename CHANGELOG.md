@@ -1,5 +1,37 @@
 # Changelog
 
+## Unreleased — v0.3.0 (the judge; coupled launch with stull)
+
+In progress on the `judge` branch. The deterministic detector can't tell a
+precise term of art (`hook`) from a dilutable tic (`substrate`) — that's
+word-sense disambiguation, which static embeddings provably can't do (the
+gloss-coherence discriminator was measured and inverted). So one fenced LLM
+judgment enters the loop.
+
+- `internal/judge`: the cell-facing contract — per-word strict-tool schema
+  confining `demote_to` to the vetted ladder (select, never invent), a
+  stull-compatible `Grammar`/`Safety` pair (safety rejects incoherent
+  verdicts), and a verdict `Store` that is both cache and calibration log.
+- `pipeline.Build` gains an optional `judge.Judger` gate: `term_of_art`
+  entries are suppressed, `tic`/`mixed` kept with the chosen rung and a
+  one-clause note; an inconclusive verdict fails safe to the un-gated
+  entry. Off by default — the deterministic pipeline is unchanged without
+  a judge.
+- The fence is stull's `spec.Cell` used standalone (verified: `package
+  spec` imports only stdlib). basanite is stull's first public consumer of
+  its standalone fenced-oracle entry point; the two ship coupled.
+- Deterministic proper-noun guard ahead of the fence: a `proper-nouns.txt`
+  (data dir or `~/.config/basanite`) of known project/tool names is
+  suppressed outright — a frequency+sense pass reliably mistakes a project
+  literally named `calque` for the common word. Runs without the judge and
+  saves it a call. Found because the live judge made exactly that miss on
+  the real corpus.
+- Ablation test proves the gate earns its keep with a scripted judge — no
+  LLM required to test the gate logic.
+- Remaining before release: the live `cell.go` wiring (stull import +
+  Anthropic SDK), gated on stull's public tag, then a real-corpus
+  calibration pass (does it drop `hook`, keep `substrate`?).
+
 ## v0.2.0 (2026-06-10)
 
 - Chronic-tic detection: the report adds steady high-rate words the riser

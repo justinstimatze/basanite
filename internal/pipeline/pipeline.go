@@ -12,6 +12,7 @@ import (
 	"github.com/justinstimatze/basanite/internal/corpus"
 	"github.com/justinstimatze/basanite/internal/detect"
 	"github.com/justinstimatze/basanite/internal/embed"
+	"github.com/justinstimatze/basanite/internal/judge"
 	"github.com/justinstimatze/basanite/internal/report"
 	"github.com/justinstimatze/basanite/internal/text"
 	"github.com/justinstimatze/basanite/internal/wordnet"
@@ -142,13 +143,14 @@ type Options struct {
 	RecentDays, BaselineDays int
 	Top, MinCount            int
 	MinRatio                 float64
-	MaxUses                  int     // sentences judged per word
-	MinUses                  int     // below this, a word is skipped as unjudgeable
-	Threshold                float64 // cosine floor for a clean substitution
-	MinClean                 float64 // clean fraction a rung needs to survive
-	ChronicTop               int     // max chronic entries to add after the risers
-	MinChronicRate           float64 // per-1k full-window rate floor for chronic candidates
-	RarityFloor              float64 // WordIC (SemCor -ln p) floor for the rare-word chronic route
+	MaxUses                  int             // sentences judged per word
+	MinUses                  int             // below this, a word is skipped as unjudgeable
+	Threshold                float64         // cosine floor for a clean substitution
+	MinClean                 float64         // clean fraction a rung needs to survive
+	ChronicTop               int             // max chronic entries to add after the risers
+	MinChronicRate           float64         // per-1k full-window rate floor for chronic candidates
+	RarityFloor              float64         // WordIC (SemCor -ln p) floor for the rare-word chronic route
+	ProperNouns              map[string]bool // lemmas to suppress outright — known project/tool names a frequency+sense pass mistakes for tics
 }
 
 // Chronic evidence gates: a steady high-rate word is only flagged when a
@@ -185,7 +187,14 @@ type VectorLoader func(vocab map[string]bool) (*embed.Table, error)
 
 // Build runs the whole offline pipeline over turns and returns the report
 // the hook will inject from.
-func Build(turns []corpus.Turn, wn *wordnet.DB, loadVectors VectorLoader, now time.Time, opts Options) (*report.Report, error) {
+//
+// jdg is the optional term-of-art gate: when non-nil, each assembled entry's
+// word, vetted demote rungs, and real sample uses are put to the fenced LLM
+// judge, which the deterministic stack provably cannot replace — it tells a
+// precise term of art ("hook", suppressed) from a dilutable tic ("substrate",
+// kept, with the truer rung named). nil disables the gate (pure-deterministic
+// behavior); an inconclusive verdict fails safe to the un-gated entry.
+func Build(turns []corpus.Turn, wn *wordnet.DB, loadVectors VectorLoader, jdg judge.Judger, now time.Time, opts Options) (*report.Report, error) {
 	recentStart := now.AddDate(0, 0, -opts.RecentDays)
 	baselineStart := recentStart.AddDate(0, 0, -opts.BaselineDays)
 	w, sents := Pass(turns, recentStart, baselineStart)
@@ -348,6 +357,31 @@ func Build(turns []corpus.Turn, wn *wordnet.DB, loadVectors VectorLoader, now ti
 		// stable: equal-IC rungs (same-synset synonyms) keep their
 		// RankSubstitutes order — best empirical substitute first
 		sort.SliceStable(e.Ladder, func(a, b int) bool { return e.Ladder[a].IC < e.Ladder[b].IC })
+
+		// Deterministic proper-noun guard, ahead of the fence: a known
+		// project/tool name is never a dilutable tic, and a frequency+sense
+		// pass (human or LLM) reliably mistakes it for one. Suppressing here
+		// also saves the judge a call.
+		if opts.ProperNouns[j.lemma] {
+			continue
+		}
+
+		// The gate: the one judgment the deterministic stack can't make.
+		if jdg != nil {
+			demote := make([]string, 0, len(e.Ladder))
+			for _, r := range e.Ladder {
+				if r.Word != j.lemma {
+					demote = append(demote, r.Word)
+				}
+			}
+			if v, ok := jdg.Judge(j.lemma, demote, j.uses); ok {
+				if v.Role == judge.RoleTermOfArt {
+					continue // precise term of art: no valid substitute — suppress, don't count it
+				}
+				e.JudgeRole, e.JudgeNote, e.DemoteTo = v.Role, v.Note, v.DemoteTo
+			}
+		}
+
 		rep.Entries = append(rep.Entries, e)
 		if j.kind == "chronic" {
 			chronicAdded++

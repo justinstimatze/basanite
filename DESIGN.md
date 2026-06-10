@@ -84,18 +84,70 @@ often the wrong sense, not interchangeable. Two deterministic fixes:
 The design started bigger and was trimmed hard. Recording the cuts so they
 don't creep back:
 
-- **No LLM in the loop.** The signature-vs-tic judgment is covered by the
-  variance freebie. Everything is offline, local, deterministic.
+- **~~No LLM in the loop.~~ Reversed on measurement — see "The judge"
+  below.** The original cut assumed the variance freebie covered the
+  signature-vs-tic judgment. It doesn't reach the term-of-art case, and a
+  deterministic substitute was tried and failed (gloss-context coherence
+  did not separate `hook` from `substrate`). One fenced LLM judgment is now
+  in the loop; everything else stays offline, local, deterministic.
 - **No per-turn rewriting or post-processing.** Filtering output launders
   voice and adds latency for a signal that fires rarely. Awareness at turn
-  start; the writer decides.
-- **No framework wrapper.** The runtime behavior is one state with a
-  self-loop — "on prompt submit, maybe inject once." A state-machine
-  framework can't improve a single if-statement; the hook stays a plain
-  subcommand. Revisit only if the tool grows a real cross-turn protocol
-  (e.g. adaptive nagging: inject → watch the rate → escalate or back off
-  as genuinely distinct states).
+  start; the writer decides. (Still true — the judge runs at report-build
+  time, not per turn; the hook stays a 4ms deterministic injector.)
+- **No framework wrapper as the runtime.** The hook is one state with a
+  self-loop — "on prompt submit, maybe inject once" — and a state-machine
+  framework can't improve a single if-statement, so the *runtime* stays a
+  plain subcommand. But the build-time judge *does* use stull's `spec.Cell`
+  as a standalone fence (not its machine runtime) — see below.
 - **Awareness, never prohibition** (see above).
+
+## The judge — a measured reversal (the hybrid-loop seam)
+
+The two deterministic mitigations detect and rank well, but the
+*prescription* has a hard boundary the no-LLM design walked into: telling a
+**dilutable tic** (`substrate` — reach for it loosely, a weaker word is
+often truer) from a **precise term of art** (`hook` — the Claude Code
+concept; there is no valid synonym, and `→ snare` would be actively wrong)
+is word-sense disambiguation. Static embeddings and frequency are
+sense-blind by construction; the context that disambiguates is exactly what
+they discard.
+
+This was not assumed — it was measured. The cheap deterministic candidate,
+gloss-context coherence (does WordNet's sense of the word match the words it
+co-occurs with in the corpus?), *inverted* on real data: `hook` 0.63,
+`substrate` 0.57. So that one judgment — and only that one — crosses into a
+fenced LLM cell:
+
+- **The deterministic detector manufactures the cell's choice set.** Risers
+  + the WordNet/cloze-vetted demote ladder + real sample sentences are the
+  input. The frequency gate means the judge sees ~12 words per refresh,
+  never the vocabulary.
+- **The cell can only select, never invent.** Its strict-tool schema
+  confines `demote_to` to an enum of exactly that word's vetted ladder plus
+  "none"; a grammar re-parses; a safety check rejects incoherent verdicts
+  (a term of art offering a swap, a tic naming none). Malformed or
+  incoherent → fail safe to the un-gated entry. The LLM brings the sense
+  judgment; the code keeps it on the rails.
+- **The gate acts.** `term_of_art` → suppressed (no valid substitute);
+  `tic`/`mixed` → kept, carrying the chosen rung and a one-clause note.
+- **The verdict log is cache and calibration at once** — keyed by
+  word+ladder+model+schema, so an unchanged word isn't re-judged, and the
+  append-only trail is what an ablation reads to confirm the gate earns its
+  keep.
+
+The fence is stull's `spec.Cell` (`NewConfinedCell` + `Cell.Check`), used
+**standalone** — verified from source: `package spec` imports only stdlib
+`sort`, so the Cell is a fenced-oracle library independent of stull's
+hook-statechart runtime. That runtime is the *wrong* host here (the
+judgment is build-time batch over corpus payload, not per-hook-event over
+transcript), so basanite uses stull's Cell as the fence, not its machine as
+the shell. The two ship as a coupled launch: basanite is stull's first
+public consumer of the standalone-Cell entry point.
+
+Cost honestly stated: the judge needs Anthropic credentials at
+report/refresh time (Haiku, prompt-cached across the dozen calls, offline,
+cheap), and it is the one place basanite is no longer self-contained. It is
+off by default; the deterministic pipeline runs unchanged without it.
 
 ## Calibration findings (real data, ~770k tokens over 21 days)
 
