@@ -7,8 +7,9 @@ A deterministic, local tool — **no LLM in the default path** — that detects
 reaches for reflexively (`load-bearing`, `spine`, …) until overuse debases
 them. It measures frequency drift over the JSONL transcripts, then injects
 awareness of each tic, plus a ranked ladder of alternatives, at turn start.
-An optional, fenced LLM judge (off by default) handles the one judgment the
-deterministic stack can't — telling a term of art from a dilutable tic.
+A fenced LLM judge handles the one judgment the deterministic stack can't —
+telling a term of art from a dilutable tic — and runs by default when an API
+key is configured (it falls back to deterministic without one).
 
 Basanite is the dark stone an assayer streaks a sample against to judge it —
 a touchstone. Design rationale, including what was deliberately left out,
@@ -22,7 +23,7 @@ basanite trend <lemma>…  # weekly rate per lemma — the effectiveness check
 basanite ladder <word>…  # specificity ladder per sense, weakest → strongest
 basanite vet <word>…     # judge candidates against your own past sentences
 basanite report          # full pipeline (scan→vet→ladder) → state file, ~1 min
-                         #   add --judge to gate out terms of art (opt-in, needs a key)
+                         #   judges out terms of art by default; --judge=false for deterministic-only
 basanite refresh         # regenerate the state file if stale (SessionStart entry)
 basanite hook            # UserPromptSubmit entry: inject the report, ~4 ms
 basanite version
@@ -151,15 +152,20 @@ a malformed or incoherent verdict fails safe to the un-gated entry.
 with a per-sense note. The fence is [stull](https://github.com/justinstimatze/stull)'s
 `spec.Cell` used as a standalone fenced-oracle library.
 
-It is **off by default**, runs at report time (not per turn), needs
-`ANTHROPIC_API_KEY` (in the environment or a `.env` — see `.env.example`),
-and uses a cheap model with prompt caching. A `proper-nouns.txt` (data dir
-or `~/.config/basanite`) of your project/tool names is suppressed
-deterministically *before* the judge — a frequency+sense pass otherwise
-mistakes a project literally named `calque` for the common word.
+It runs **by default when a key is configured** — the deterministic-only
+report is the one that confidently mis-suggests synonyms for terms of art
+(`hook → snare`), so the judge is the default experience, not an add-on. It
+needs `ANTHROPIC_API_KEY` (in the environment or a `.env` — see
+`.env.example`), runs at report time (not per turn), and uses a cheap model
+with prompt caching. Without a key it falls back to deterministic rather than
+fail. A `proper-nouns.txt` (data dir or `~/.config/basanite`) of your
+project/tool names is suppressed deterministically *before* the judge — a
+frequency+sense pass otherwise mistakes a project literally named `calque`
+for the common word.
 
 ```
-basanite report --judge          # gate the report through the judge
+basanite report                  # judge runs when a key is configured
+basanite report --judge=false    # deterministic-only, no API calls
 ```
 
 ### The hook

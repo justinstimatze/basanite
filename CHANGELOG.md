@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.3.1 (2026-06-10)
+
+- The judge is now **on by default** when an API key is configured. The
+  deterministic-only report is the one that confidently mis-suggests
+  synonyms for terms of art (`hook → snare`) — the session's central
+  finding — so gating is the default experience, not an opt-in. Without a
+  key, `report` falls back to deterministic rather than failing;
+  `--judge=false` forces it off. The status (`judge on` / `off`) prints
+  with the entry count.
+
 ## v0.3.0 (2026-06-10) — the judge; coupled launch with stull
 
 The deterministic detector can't tell a precise term of art (`hook`) from a

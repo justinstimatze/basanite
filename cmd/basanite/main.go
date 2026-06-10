@@ -385,7 +385,7 @@ func runReport(args []string) error {
 		chronicTop    = fs.Int("chronic", def.ChronicTop, "max chronic (steady high-rate) entries; 0 disables")
 		chronicRate   = fs.Float64("chronic-rate", def.MinChronicRate, "per-1k full-window rate floor for chronic candidates")
 		chronicRarity = fs.Float64("chronic-rarity", def.RarityFloor, "SemCor WordIC floor for the rare-word chronic route")
-		judgeOn       = fs.Bool("judge", false, "gate entries through the term-of-art LLM judge (needs ANTHROPIC_API_KEY)")
+		useJudge      = fs.Bool("judge", true, "run the term-of-art judge when an API key is configured (default; --judge=false for the deterministic-only report)")
 		judgeModel    = fs.String("judge-model", "", "judge model id (default: a cheap haiku)")
 	)
 	fs.Parse(args)
@@ -395,24 +395,32 @@ func runReport(args []string) error {
 	def.MaxUses, def.Threshold, def.MinClean = *maxUses, *threshold, *minClean
 	def.ChronicTop, def.MinChronicRate, def.RarityFloor = *chronicTop, *chronicRate, *chronicRarity
 
+	// The judge is the default: the deterministic-only report is the one that
+	// confidently mis-suggests synonyms for terms of art (hook -> snare), the
+	// finding that motivated the judge in the first place. It runs whenever a
+	// key is configured; without one, fall back to deterministic rather than
+	// fail — a keyless clone still works, with the documented rough edges.
 	var jdg judge.Judger
-	if *judgeOn {
+	judgeStatus := "off (--judge=false)"
+	if *useJudge {
 		p, err := report.StateDir()
 		if err != nil {
 			return err
 		}
-		cj, err := judge.New(p, *dataDir, *judgeModel)
-		if err != nil {
-			return err // -judge was explicit; a missing key is a hard error here
+		if cj, err := judge.New(p, *dataDir, *judgeModel); err == nil {
+			jdg = cj
+			judgeStatus = "on"
+		} else {
+			judgeStatus = "off (deterministic fallback)"
+			fmt.Fprintf(os.Stderr, "basanite: %v — running deterministic; the term-of-art gate is off\n", err)
 		}
-		jdg = cj
 	}
 
 	rep, err := buildAndSave(*dir, *dataDir, *out, *vetDays, jdg, def)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("report: %d entries\n", len(rep.Entries))
+	fmt.Printf("report: %d entries (judge %s)\n", len(rep.Entries), judgeStatus)
 	if s := rep.Render(); s != "" {
 		fmt.Print(s)
 	}
