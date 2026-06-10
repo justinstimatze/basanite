@@ -1,0 +1,6 @@
+  1 This is a synthetic two-space license header line, skipped by the parser.
+00001740 03 n 01 entity 0 000 | that which is perceived to exist
+00002084 05 n 02 dog 0 domestic_dog 0 001 @ 00001740 n 0000 | a member of the genus Canis
+00003000 03 n ff truncated 0
+00004000 03 n 01 cat 0 999
+00005000 03 n 01 fish 0 001 @ 00001740
