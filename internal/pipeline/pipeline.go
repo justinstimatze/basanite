@@ -482,11 +482,11 @@ func phraseEntries(w Windows, opts Options) []report.Entry {
 	out := make([]report.Entry, 0, len(list))
 	for _, c := range list {
 		out = append(out, report.Entry{
-			Kind:        "phrase",
-			Lemma:       c.text,
-			RecentCount: c.count,
-			Projects:    c.proj,
-			Rate:        float64(c.count) / float64(w.FullTotal) * 1000,
+			Kind:     "phrase",
+			Lemma:    c.text,
+			Count:    c.count,
+			Projects: c.proj,
+			Rate:     float64(c.count) / float64(w.FullTotal) * 1000,
 		})
 	}
 	return out

@@ -35,7 +35,8 @@ type Entry struct {
 	FrameFrac    float64 `json:"frame_frac,omitempty"` // share of uses in the "<det> X of" frame
 	Rarity       float64 `json:"rarity,omitempty"`     // WordIC, set when the rare-word route flagged it
 	Known        bool    `json:"known,omitempty"`      // admitted via the curated known-tics route
-	Projects     int     `json:"projects,omitempty"`   // distinct projects the phrase appears in
+	Count        int     `json:"count,omitempty"`      // phrase: full-window occurrences
+	Projects     int     `json:"projects,omitempty"`   // phrase: distinct projects it appears in
 	JudgeRole    string  `json:"judge_role,omitempty"` // tic|mixed when the LLM gate ran (term_of_art entries are dropped, never stored)
 	JudgeNote    string  `json:"judge_note,omitempty"` // the gate's one-clause awareness payload
 	DemoteTo     string  `json:"demote_to,omitempty"`  // the gate's chosen rung, when it named one
@@ -176,7 +177,11 @@ func (r *Report) Render() string {
 // note is the per-entry evidence summary in the rendered line.
 func (e Entry) note() string {
 	if e.Kind == "phrase" {
-		return fmt.Sprintf("a stock phrase, %d× this window — reach for a fresh one", e.RecentCount)
+		span := ""
+		if e.Projects > 1 {
+			span = fmt.Sprintf(" across %d projects", e.Projects)
+		}
+		return fmt.Sprintf("a stock phrase, %d×%s this window — reach for a fresh one", e.Count, span)
 	}
 	if e.Kind != "chronic" {
 		return fmt.Sprintf("%.1f× your baseline", e.Ratio)

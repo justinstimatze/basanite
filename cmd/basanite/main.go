@@ -422,25 +422,26 @@ func runReport(args []string) error {
 		}
 	}
 
-	// Note a first-run seed of the known-tics list before the build creates
-	// it, so the user learns where their editable copy now lives.
-	firstRun := false
-	if p := knownTicsPath(); p != "" {
-		if _, err := os.Stat(p); os.IsNotExist(err) {
-			firstRun = true
-		}
-	}
+	known, seeded := applyKnownTics(&def)
 
 	rep, err := buildAndSave(*dir, *dataDir, *out, *vetDays, jdg, def)
 	if err != nil {
 		return err
 	}
-	if firstRun {
-		fmt.Printf("seeded your editable known-tics list at %s\n", knownTicsPath())
-	}
 	fmt.Printf("report: %d entries (judge %s)\n", len(rep.Entries), judgeStatus)
 	if s := rep.Render(); s != "" {
 		fmt.Print(s)
+	}
+	// Always surface where the editable list lives and how big it is, so the
+	// user can curate it regardless of whether a background refresh seeded it
+	// first (the first-run announcement alone would miss that case).
+	if p := knownTicsPath(); p != "" {
+		verb := "edit"
+		if seeded {
+			verb = "seeded; edit"
+		}
+		fmt.Printf("known-tics: %d words, %d phrases — %s %s to curate\n",
+			len(known.Words), len(known.Phrases), verb, p)
 	}
 	return nil
 }
@@ -460,9 +461,6 @@ func buildAndSave(dir, dataDir, out string, vetDays int, jdg judge.Judger, opts 
 		return nil, err
 	}
 	opts.ProperNouns = loadProperNouns(dataDir)
-	known, _ := knowntics.Load(knownTicsPath())
-	opts.KnownTics = known.Words
-	opts.Phrases = phrase.New(known.Phrases)
 	now := time.Now()
 	turns, err := corpus.Read(dir, now.AddDate(0, 0, -vetDays))
 	if err != nil {
@@ -529,7 +527,9 @@ func runRefresh(args []string) error {
 	if cj, err := judge.New(stateDir, *dataDir, ""); err == nil {
 		jdg = cj
 	}
-	rep, err := buildAndSave(*dir, *dataDir, path, defaultVetDays, jdg, defaultReportOptions())
+	opts := defaultReportOptions()
+	applyKnownTics(&opts)
+	rep, err := buildAndSave(*dir, *dataDir, path, defaultVetDays, jdg, opts)
 	status := fmt.Sprintf("%s ok: %d entries\n", time.Now().Format(time.RFC3339), entryCount(rep))
 	if err != nil {
 		status = fmt.Sprintf("%s error: %v\n", time.Now().Format(time.RFC3339), err)
@@ -655,6 +655,18 @@ func knownTicsPath() string {
 		return ""
 	}
 	return filepath.Join(home, ".config", "basanite", "known-tics.txt")
+}
+
+// applyKnownTics loads the user-owned known-tics list (seeding it on first
+// run) and sets the detector inputs on opts. It returns the parsed set and
+// whether the file was just seeded, so an interactive caller can report where
+// the list now lives. Both report and refresh call this, so the background
+// path can't drift from the documented one.
+func applyKnownTics(opts *pipeline.Options) (*knowntics.Set, bool) {
+	known, seeded := knowntics.Load(knownTicsPath())
+	opts.KnownTics = known.Words
+	opts.Phrases = phrase.New(known.Phrases)
+	return known, seeded
 }
 
 // loadWordNet opens the dict files plus the IC table when present (its

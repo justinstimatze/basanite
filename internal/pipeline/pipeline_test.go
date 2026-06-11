@@ -350,7 +350,7 @@ func TestBuildPhraseTrack(t *testing.T) {
 	if e == nil {
 		t.Fatalf("phrase track did not surface the stock phrase: %+v", rep.Entries)
 	}
-	if e.Kind != "phrase" || len(e.Ladder) != 0 || e.RecentCount != 5 {
+	if e.Kind != "phrase" || len(e.Ladder) != 0 || e.Count != 5 {
 		t.Errorf("phrase entry malformed: %+v", e)
 	}
 	if got := e.Rate; got <= 0 {

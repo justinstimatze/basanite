@@ -122,17 +122,32 @@ func TestRenderDemoteOnlyAndTrimmed(t *testing.T) {
 
 func TestRenderPhraseEntry(t *testing.T) {
 	r := &Report{Entries: []Entry{
-		{Kind: "phrase", Lemma: "i want to honor that", RecentCount: 7, Rate: 0.3},
+		{Kind: "phrase", Lemma: "i want to honor that", Count: 7, Projects: 3, Rate: 0.3},
 	}}
 	out := r.Render()
 	if !strings.Contains(out, `"i want to honor that"`) {
 		t.Errorf("phrase not rendered with its text: %q", out)
 	}
-	if !strings.Contains(out, "stock phrase, 7×") {
-		t.Errorf("phrase note missing its count: %q", out)
+	if !strings.Contains(out, "stock phrase, 7× across 3 projects") {
+		t.Errorf("phrase note missing its count and dispersion: %q", out)
 	}
 	if strings.Contains(out, "<") {
 		t.Errorf("phrase entry must render no ladder: %q", out)
+	}
+}
+
+// A single-project phrase omits the dispersion clause rather than printing
+// "across 1 projects".
+func TestRenderPhraseSingleProject(t *testing.T) {
+	r := &Report{Entries: []Entry{
+		{Kind: "phrase", Lemma: "that said", Count: 6, Projects: 1, Rate: 0.2},
+	}}
+	out := r.Render()
+	if !strings.Contains(out, "stock phrase, 6× this window") {
+		t.Errorf("single-project phrase note malformed: %q", out)
+	}
+	if strings.Contains(out, "across") {
+		t.Errorf("single-project phrase must not print a dispersion clause: %q", out)
 	}
 }
 
