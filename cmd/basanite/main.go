@@ -21,6 +21,8 @@ import (
 	"github.com/justinstimatze/basanite/internal/detect"
 	"github.com/justinstimatze/basanite/internal/embed"
 	"github.com/justinstimatze/basanite/internal/judge"
+	"github.com/justinstimatze/basanite/internal/knowntics"
+	"github.com/justinstimatze/basanite/internal/phrase"
 	"github.com/justinstimatze/basanite/internal/pipeline"
 	"github.com/justinstimatze/basanite/internal/report"
 	"github.com/justinstimatze/basanite/internal/text"
@@ -110,7 +112,7 @@ func runScan(args []string) error {
 		return err
 	}
 
-	win, _ := pipeline.Pass(turns, recentStart, baselineStart)
+	win, _ := pipeline.Pass(turns, recentStart, baselineStart, nil)
 
 	fmt.Printf("corpus: %d turns / %dk tokens recent (%dd) · %d turns / %dk tokens baseline (%dd)\n\n",
 		win.RecentTurns, win.RecentTotal/1000, *recentDays, win.BaselineTurns, win.BaselineTotal/1000, *baselineDays)
@@ -361,6 +363,7 @@ func defaultReportOptions() pipeline.Options {
 		MaxUses: 50, MinUses: 5,
 		Threshold: 0.97, MinClean: 0.4,
 		ChronicTop: 4, MinChronicRate: 0.2, RarityFloor: 10.5,
+		PhraseTop: 4, MinPhraseCount: 5,
 	}
 }
 
@@ -385,6 +388,8 @@ func runReport(args []string) error {
 		chronicTop    = fs.Int("chronic", def.ChronicTop, "max chronic (steady high-rate) entries; 0 disables")
 		chronicRate   = fs.Float64("chronic-rate", def.MinChronicRate, "per-1k full-window rate floor for chronic candidates")
 		chronicRarity = fs.Float64("chronic-rarity", def.RarityFloor, "SemCor WordIC floor for the rare-word chronic route")
+		phraseTop     = fs.Int("phrases", def.PhraseTop, "max stock-phrase entries from the known-tics reference; 0 disables")
+		phraseMin     = fs.Int("phrase-min", def.MinPhraseCount, "minimum full-window occurrences for a phrase to surface")
 		useJudge      = fs.Bool("judge", true, "run the term-of-art judge when an API key is configured (default; --judge=false for the deterministic-only report)")
 		judgeModel    = fs.String("judge-model", "", "judge model id (default: a cheap haiku)")
 	)
@@ -394,6 +399,7 @@ func runReport(args []string) error {
 	def.Top, def.MinCount, def.MinRatio = *top, *minCount, *minRatio
 	def.MaxUses, def.Threshold, def.MinClean = *maxUses, *threshold, *minClean
 	def.ChronicTop, def.MinChronicRate, def.RarityFloor = *chronicTop, *chronicRate, *chronicRarity
+	def.PhraseTop, def.MinPhraseCount = *phraseTop, *phraseMin
 
 	// The judge is the default: the deterministic-only report is the one that
 	// confidently mis-suggests synonyms for terms of art (hook -> snare), the
@@ -416,6 +422,8 @@ func runReport(args []string) error {
 		}
 	}
 
+	known, seeded := applyKnownTics(&def)
+
 	rep, err := buildAndSave(*dir, *dataDir, *out, *vetDays, jdg, def)
 	if err != nil {
 		return err
@@ -423,6 +431,17 @@ func runReport(args []string) error {
 	fmt.Printf("report: %d entries (judge %s)\n", len(rep.Entries), judgeStatus)
 	if s := rep.Render(); s != "" {
 		fmt.Print(s)
+	}
+	// Always surface where the editable list lives and how big it is, so the
+	// user can curate it regardless of whether a background refresh seeded it
+	// first (the first-run announcement alone would miss that case).
+	if p := knownTicsPath(); p != "" {
+		verb := "edit"
+		if seeded {
+			verb = "seeded; edit"
+		}
+		fmt.Printf("known-tics: %d words, %d phrases — %s %s to curate\n",
+			len(known.Words), len(known.Phrases), verb, p)
 	}
 	return nil
 }
@@ -508,7 +527,9 @@ func runRefresh(args []string) error {
 	if cj, err := judge.New(stateDir, *dataDir, ""); err == nil {
 		jdg = cj
 	}
-	rep, err := buildAndSave(*dir, *dataDir, path, defaultVetDays, jdg, defaultReportOptions())
+	opts := defaultReportOptions()
+	applyKnownTics(&opts)
+	rep, err := buildAndSave(*dir, *dataDir, path, defaultVetDays, jdg, opts)
 	status := fmt.Sprintf("%s ok: %d entries\n", time.Now().Format(time.RFC3339), entryCount(rep))
 	if err != nil {
 		status = fmt.Sprintf("%s error: %v\n", time.Now().Format(time.RFC3339), err)
@@ -622,6 +643,30 @@ func loadProperNouns(dataDir string) map[string]bool {
 		f.Close()
 	}
 	return set
+}
+
+// knownTicsPath is the user-owned known-tics list: ~/.config/basanite/known-tics.txt,
+// seeded from the embedded starter on first run and the user's to curate after.
+// "" when there is no home dir, in which case knowntics.Load uses the seed
+// in memory.
+func knownTicsPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".config", "basanite", "known-tics.txt")
+}
+
+// applyKnownTics loads the user-owned known-tics list (seeding it on first
+// run) and sets the detector inputs on opts. It returns the parsed set and
+// whether the file was just seeded, so an interactive caller can report where
+// the list now lives. Both report and refresh call this, so the background
+// path can't drift from the documented one.
+func applyKnownTics(opts *pipeline.Options) (*knowntics.Set, bool) {
+	known, seeded := knowntics.Load(knownTicsPath())
+	opts.KnownTics = known.Words
+	opts.Phrases = phrase.New(known.Phrases)
+	return known, seeded
 }
 
 // loadWordNet opens the dict files plus the IC table when present (its

@@ -119,3 +119,44 @@ func TestRenderDemoteOnlyAndTrimmed(t *testing.T) {
 		t.Error("empty report must render to empty string")
 	}
 }
+
+func TestRenderPhraseEntry(t *testing.T) {
+	r := &Report{Entries: []Entry{
+		{Kind: "phrase", Lemma: "i want to honor that", Count: 7, Projects: 3, Rate: 0.3},
+	}}
+	out := r.Render()
+	if !strings.Contains(out, `"i want to honor that"`) {
+		t.Errorf("phrase not rendered with its text: %q", out)
+	}
+	if !strings.Contains(out, "stock phrase, 7× across 3 projects") {
+		t.Errorf("phrase note missing its count and dispersion: %q", out)
+	}
+	if strings.Contains(out, "<") {
+		t.Errorf("phrase entry must render no ladder: %q", out)
+	}
+}
+
+// A single-project phrase omits the dispersion clause rather than printing
+// "across 1 projects".
+func TestRenderPhraseSingleProject(t *testing.T) {
+	r := &Report{Entries: []Entry{
+		{Kind: "phrase", Lemma: "that said", Count: 6, Projects: 1, Rate: 0.2},
+	}}
+	out := r.Render()
+	if !strings.Contains(out, "stock phrase, 6× this window") {
+		t.Errorf("single-project phrase note malformed: %q", out)
+	}
+	if strings.Contains(out, "across") {
+		t.Errorf("single-project phrase must not print a dispersion clause: %q", out)
+	}
+}
+
+func TestRenderKnownLeanNote(t *testing.T) {
+	r := &Report{Entries: []Entry{{
+		Kind: "chronic", Lemma: "surface", Rate: 0.5, Known: true,
+		Ladder: []Rung{{Word: "exterior", IC: 1}, {Word: "surface", IC: 5}},
+	}}}
+	if !strings.Contains(r.Render(), "a common Claude lean") {
+		t.Errorf("known-route entry must flag itself as a Claude lean:\n%s", r.Render())
+	}
+}

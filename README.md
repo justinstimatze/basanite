@@ -168,6 +168,39 @@ basanite report                  # judge runs when a key is configured
 basanite report --judge=false    # deterministic-only, no API calls
 ```
 
+### The known-tics reference (Claude Bingo)
+
+The derived signals (rising rate, rarity, repeated frame) catch tics from
+their *shape*. Some leans are known by reputation instead. basanite ships a
+conservative **sample of the globally common ones** — the assistant-register
+staples that recur across Claude Code transcripts (`you're absolutely right`,
+`worth noting`, `that said`) plus a few iconic signatures seeded from the
+community "Claude Bingo" card — embedded as `known-tics.txt`. It is kept
+high-precision on purpose; niche or personal leans go in your own list. It
+feeds two things:
+
+- **Known single words** become a third chronic admission route. The rarity
+  route catches words rare in general English (`substrate`, `load-bearing`);
+  the known route catches *common*-English leans it can't see by shape
+  (`surface`, `frame`, `honor`) — but only when they're steady and dispersed,
+  and they still go through the ladder and the judge. Flagged "a common
+  Claude lean".
+- **Phrases** get their own track. The single-token detector is blind to
+  stock phrases (`i want to honor that`) — the words are individually
+  unremarkable; the tic is the sequence. A matcher counts the curated phrases
+  over the surface word stream (stopwords kept) and surfaces the most-used as
+  awareness-only entries — there's no synonym ladder for a stock phrase, just
+  the awareness that you keep reaching for it.
+
+It stays a reference, not a denylist: a seeded entry only surfaces when
+you're actually leaning on it now. And it's a *seed*, not a baked-in list —
+on first run the starter set is written to `~/.config/basanite/known-tics.txt`,
+and from then on that file is the only one read. It's yours to curate: add
+your own leans, delete ones that stop mattering as models change. Nothing
+upstream re-applies over your edits (one entry per line, `#` comments; a line
+with a space is a phrase, otherwise a single word). `--phrases N` /
+`--phrase-min N` tune the phrase track; `--phrases=0` disables it.
+
 ### The hook
 
 `report` composes the pipeline offline (one corpus read; risers with no
@@ -226,10 +259,13 @@ Nothing is redistributed in this repository. The binary looks for assets in
   makes a *cached* verdict stable, but the judgment remains a model call,
   not a proof. Project-name proper nouns are handled deterministically by
   `proper-nouns.txt`, not by the model.
-- The chronic stage needs frame or rarity evidence; a chronic tic that is
-  a common English word used without a repeating frame won't be flagged.
-- Entries are capped (8 risers + 4 chronic per report) so the injection
-  stays digestible; a tic below those cuts waits its turn.
+- The chronic stage needs frame, rarity, or known-tics evidence; a chronic
+  tic that is a common English word, used without a repeating frame and not
+  on the curated reference, won't be flagged.
+- Phrase detection is exact match against the curated list — it catches the
+  known phrases, not novel ones, and a heavily reworded variant slips it.
+- Entries are capped (8 risers + 4 chronic + 4 known + 4 phrases per report)
+  so the injection stays digestible; a tic below those cuts waits its turn.
 
 ## License
 

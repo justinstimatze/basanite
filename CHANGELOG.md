@@ -1,5 +1,36 @@
 # Changelog
 
+## Unreleased — the known-tics reference (Claude Bingo)
+
+A curated reference of words and phrases Claude is known to lean on, shipped
+embedded in the binary as a conservative, high-precision **sample of the
+globally common ones** — the assistant-register staples that recur in Claude
+Code transcripts (`you're absolutely right`, `worth noting`, `that said`)
+plus a few iconic signatures seeded from the community "Claude Bingo" card.
+It complements the derived deterministic signals with crowd-sourced ground
+truth, and it stays a reference, not a denylist — a seeded entry still has
+to be one you're actually leaning on now before it surfaces, and the output
+stays awareness, never prohibition. Niche or personal leans go in a local
+`known-tics.txt`.
+
+- `internal/knowntics`: the reference is a single **user-owned** list. The
+  embedded content is a *starter seed* — on first run it's written to
+  `~/.config/basanite/known-tics.txt`, and from then on only that file is
+  read. It's yours to curate: entries accrete and fall out over time (a
+  model's tells age out), and nothing upstream re-merges what you deleted.
+  Single-word lines feed the chronic detector; spaced lines are phrases.
+- **Known-tics route**: a third chronic admission route. The rarity route
+  catches words rare in general English (`substrate`, `load-bearing`); the
+  known route catches *common*-English leans it structurally can't see
+  (`surface`, `frame`, `honor`) when they're steady and dispersed. Entries
+  are labelled "a common Claude lean".
+- **Phrase track** (`internal/phrase`): the single-token detector is blind to
+  stock phrases (`i want to honor that`) — the words are individually
+  unremarkable; the tic is the sequence. A matcher counts the curated phrases
+  over the surface word stream (stopwords kept) and surfaces the most-used as
+  awareness-only entries (no synonym ladder for a stock phrase). `report`
+  gains `--phrases` / `--phrase-min`.
+
 ## v0.3.1 (2026-06-10)
 
 - The judge is now **on by default** when an API key is configured. The

@@ -149,6 +149,52 @@ report/refresh time (Haiku, prompt-cached across the dozen calls, offline,
 cheap), and it is the one place basanite is no longer self-contained. It is
 off by default; the deterministic pipeline runs unchanged without it.
 
+## The known-tics reference (Claude Bingo)
+
+The detector so far catches tics by *shape* — a rate that rose, a word rare
+in general English, a frame that repeats. That misses two cases by
+construction, and a curated reference is the honest fix for both. The
+reference is a single **user-owned** list, not a baked-in one: what ships
+embedded is a *starter seed* (a conservative, high-precision sample of the
+globally common leans — the assistant-register staples that recur in Claude
+Code transcripts, plus a few iconic signatures from the "Claude Bingo" card),
+and on first run it is copied to the user's `known-tics.txt`, the only file
+read thereafter. This is the deliberate choice over a baked-in list plus a
+user override: two lists meant the seed silently re-added what the user
+deleted, so a lean could never age out — and they do age out, as the model
+underneath changes. One list the user owns lets entries accrete and fall away.
+It is a *reference*, not a denylist: a seeded entry still has to clear the
+chronic rate and dispersion gates before it surfaces, and the output stays
+awareness, never prohibition.
+
+- **Common-English single-word leans.** `substrate` and `load-bearing` are
+  rare in general English, so the rarity route sees them. `surface`,
+  `frame`, `honor` are *not* rare — they sit at ordinary WordIC — yet they're
+  reflexive Claude leans. No frequency-or-rarity shape separates them from
+  ordinary vocabulary, because there isn't one; the signal is external
+  knowledge. So the known list is a third chronic admission route, parallel
+  to frame and rarity, with its own output budget so it can't be crowded out.
+  These still run the ladder and the judge — the reference only admits; it
+  doesn't decide the verdict.
+
+- **Phrases.** "I want to honor that", "sitting with you in this" — the tic
+  is a multi-word sequence whose words are each unremarkable. The single-token
+  pipeline (lemmas, WordNet ladders, cloze vectors) is structurally
+  word-shaped and can't represent it. So phrases get a separate, simpler
+  track: count the curated phrases over the *surface* word stream (stopwords
+  kept — the phrase's evidence is exactly what the lemma tokenizer drops),
+  surface the most-used. There is no synonym ladder for a stock phrase, so a
+  phrase entry is awareness-only ("you keep reaching for this"). A fixed
+  multi-word phrase is unambiguously diction, not topic, so it needs none of
+  the leave-loudest-out / cross-project machinery the single-word risers use
+  to separate diction from domain nouns — a count floor suffices.
+
+The cost is honesty about provenance: the rest of the pipeline is *derived*
+from the corpus; the reference is *asserted* from outside it. That's why it's
+admission-only and gated, never a suppression or a verdict — the curated list
+points the detector at a word; the deterministic stack (and the judge) still
+have to earn the flag.
+
 ## Calibration findings (real data, ~770k tokens over 21 days)
 
 - The substitutability ranking works: `problem → question/trouble` held in

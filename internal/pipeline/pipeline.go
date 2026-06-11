@@ -13,6 +13,7 @@ import (
 	"github.com/justinstimatze/basanite/internal/detect"
 	"github.com/justinstimatze/basanite/internal/embed"
 	"github.com/justinstimatze/basanite/internal/judge"
+	"github.com/justinstimatze/basanite/internal/phrase"
 	"github.com/justinstimatze/basanite/internal/report"
 	"github.com/justinstimatze/basanite/internal/text"
 	"github.com/justinstimatze/basanite/internal/wordnet"
@@ -30,6 +31,11 @@ type Windows struct {
 	Full                       map[string]int
 	FullTotal                  int
 	FullProjects               map[string]map[string]bool // lemma -> projects using it, full window
+	// Phrase track: counts of known multi-word phrases over the full window,
+	// kept separate from the lemma counts because phrases are matched on the
+	// surface word stream (stopwords kept), not the lemma stream.
+	Phrases        map[string]int
+	PhraseProjects map[string]map[string]bool // phrase -> projects using it
 }
 
 // Pass tokenizes every turn exactly once, producing the window counts for
@@ -39,13 +45,15 @@ type Windows struct {
 // produce. Turns older than baselineStart still feed the corpus and the
 // full counts — the vet context window is deliberately wider than the scan
 // windows.
-func Pass(turns []corpus.Turn, recentStart, baselineStart time.Time) (Windows, *cloze.Corpus) {
+func Pass(turns []corpus.Turn, recentStart, baselineStart time.Time, pm *phrase.Matcher) (Windows, *cloze.Corpus) {
 	w := Windows{
-		Recent:       map[string]int{},
-		Baseline:     map[string]int{},
-		PerProject:   map[string]map[string]int{},
-		Full:         map[string]int{},
-		FullProjects: map[string]map[string]bool{},
+		Recent:         map[string]int{},
+		Baseline:       map[string]int{},
+		PerProject:     map[string]map[string]int{},
+		Full:           map[string]int{},
+		FullProjects:   map[string]map[string]bool{},
+		Phrases:        map[string]int{},
+		PhraseProjects: map[string]map[string]bool{},
 	}
 	sents := cloze.NewCorpus()
 	for _, t := range turns {
@@ -59,6 +67,19 @@ func Pass(turns []corpus.Turn, recentStart, baselineStart time.Time) (Windows, *
 		}
 		for _, sent := range text.Sentences(t.Text) {
 			sents.Add(sent)
+			if !pm.Empty() {
+				hits := map[string]int{}
+				pm.Count(text.Words(sent.Raw), hits)
+				for ph, n := range hits {
+					w.Phrases[ph] += n
+					pp := w.PhraseProjects[ph]
+					if pp == nil {
+						pp = map[string]bool{}
+						w.PhraseProjects[ph] = pp
+					}
+					pp[t.Project] = true
+				}
+			}
 			for _, tok := range sent.Tokens {
 				w.Full[tok]++
 				w.FullTotal++
@@ -151,6 +172,10 @@ type Options struct {
 	MinChronicRate           float64         // per-1k full-window rate floor for chronic candidates
 	RarityFloor              float64         // WordIC (SemCor -ln p) floor for the rare-word chronic route
 	ProperNouns              map[string]bool // lemmas to suppress outright — known project/tool names a frequency+sense pass mistakes for tics
+	KnownTics                map[string]bool // curated single-word leans — a third chronic admission route, for common-English words the rarity route can't see (surface, frame, honor)
+	Phrases                  *phrase.Matcher // curated multi-word leans, counted as a separate awareness-only track
+	PhraseTop                int             // max phrase entries to add; 0 disables the phrase track
+	MinPhraseCount           int             // minimum full-window occurrences for a phrase to surface
 }
 
 // Chronic evidence gates: a steady high-rate word is only flagged when a
@@ -197,7 +222,7 @@ type VectorLoader func(vocab map[string]bool) (*embed.Table, error)
 func Build(turns []corpus.Turn, wn *wordnet.DB, loadVectors VectorLoader, jdg judge.Judger, now time.Time, opts Options) (*report.Report, error) {
 	recentStart := now.AddDate(0, 0, -opts.RecentDays)
 	baselineStart := recentStart.AddDate(0, 0, -opts.BaselineDays)
-	w, sents := Pass(turns, recentStart, baselineStart)
+	w, sents := Pass(turns, recentStart, baselineStart, opts.Phrases)
 	risers := detect.Rank(w.Recent, w.PerProject, w.Baseline, w.RecentTotal, w.BaselineTotal, opts.MinCount, opts.MinRatio, opts.Top)
 
 	type job struct {
@@ -207,6 +232,7 @@ func Build(turns []corpus.Turn, wn *wordnet.DB, loadVectors VectorLoader, jdg ju
 		rate   float64 // full-window per-1k (chronic entries)
 		frame  float64 // FrameFraction over the lemma's uses
 		rarity float64 // WordIC, set only when the rarity route admitted it
+		known  bool    // admitted via the curated known-tics route
 		uses   [][]string
 		cands  []string
 		candIC map[string]float64
@@ -273,17 +299,25 @@ func Build(turns []corpus.Turn, wn *wordnet.DB, loadVectors VectorLoader, jdg ju
 			}
 			return list[i].lemma < list[j].lemma
 		})
-		framed, rare := 0, 0
+		framed, rare, known := 0, 0, 0
 		for _, c := range list {
-			if framed >= opts.ChronicTop && rare >= opts.ChronicTop {
+			if framed >= opts.ChronicTop && rare >= opts.ChronicTop && known >= opts.ChronicTop {
 				break
 			}
+			isKnown := opts.KnownTics[c.lemma]
 			isRare := len(c.lemma) >= chronicMinRareLen && wn.WordIC(c.lemma) >= opts.RarityFloor
 			j, ok := prepare(c.lemma)
 			if !ok {
 				continue
 			}
 			switch {
+			// Known route first: a curated lean carries its own evidence, so
+			// label it as such even when it would also clear the frame or
+			// rarity gate (surface/frame/honor are common in English — the
+			// rarity route structurally can't see them).
+			case isKnown && known < opts.ChronicTop:
+				known++
+				j.known = true
 			case j.frame >= chronicFrameFloor && framed < opts.ChronicTop:
 				framed++
 			case isRare && rare < opts.ChronicTop:
@@ -298,7 +332,16 @@ func Build(turns []corpus.Turn, wn *wordnet.DB, loadVectors VectorLoader, jdg ju
 	}
 
 	rep := &report.Report{GeneratedAt: now, RecentDays: opts.RecentDays, BaselineDays: opts.BaselineDays}
+
+	// Phrase track: curated stock phrases the single-token detector can't see.
+	// Awareness-only — there is no synonym ladder for "i want to honor that" —
+	// so it needs no vectors and is decided here, before the vector load and
+	// the quiet-window short-circuit. Appended after the word entries so the
+	// actionable ladders lead.
+	phrases := phraseEntries(w, opts)
+
 	if len(jobs) == 0 {
+		rep.Entries = append(rep.Entries, phrases...)
 		return rep, nil // quiet window: skip the vector scan entirely
 	}
 
@@ -308,10 +351,19 @@ func Build(turns []corpus.Turn, wn *wordnet.DB, loadVectors VectorLoader, jdg ju
 	}
 	base := cloze.Variance(tbl, baselineUses, "")
 
-	chronicAdded := 0
+	// The known route earns its own output budget so curated leans aren't
+	// crowded out by frame/rarity finds (each route admitted up to ChronicTop
+	// jobs upstream; this caps what reaches the report).
+	chronicAdded, knownAdded := 0, 0
 	for _, j := range jobs {
-		if j.kind == "chronic" && chronicAdded >= opts.ChronicTop {
-			continue
+		if j.kind == "chronic" {
+			if j.known {
+				if knownAdded >= opts.ChronicTop {
+					continue
+				}
+			} else if chronicAdded >= opts.ChronicTop {
+				continue
+			}
 		}
 		v := cloze.Variance(tbl, j.uses, j.lemma)
 		e := report.Entry{
@@ -322,6 +374,7 @@ func Build(turns []corpus.Turn, wn *wordnet.DB, loadVectors VectorLoader, jdg ju
 			Rate:         j.rate,
 			FrameFrac:    j.frame,
 			Rarity:       j.rarity,
+			Known:        j.known,
 			ClusterDelta: v.Clustered - base.Clustered,
 			Uses:         v.Uses,
 		}
@@ -384,8 +437,57 @@ func Build(turns []corpus.Turn, wn *wordnet.DB, loadVectors VectorLoader, jdg ju
 
 		rep.Entries = append(rep.Entries, e)
 		if j.kind == "chronic" {
-			chronicAdded++
+			if j.known {
+				knownAdded++
+			} else {
+				chronicAdded++
+			}
 		}
 	}
+	rep.Entries = append(rep.Entries, phrases...)
 	return rep, nil
+}
+
+// phraseEntries surfaces the most-used curated phrases as awareness-only
+// entries. A fixed multi-word phrase is unambiguously diction, not topic, so
+// it needs no cross-project dispersion test (the trick single words rely on to
+// separate a tic from a domain noun) — a count floor plus a top-N cap keeps it
+// honest, and the entries carry no ladder because no synonym replaces a stock
+// phrase. PhraseTop 0 disables the track.
+func phraseEntries(w Windows, opts Options) []report.Entry {
+	if opts.PhraseTop <= 0 || w.FullTotal == 0 {
+		return nil
+	}
+	type cand struct {
+		text  string
+		count int
+		proj  int
+	}
+	var list []cand
+	for ph, n := range w.Phrases {
+		if n < opts.MinPhraseCount {
+			continue
+		}
+		list = append(list, cand{ph, n, len(w.PhraseProjects[ph])})
+	}
+	sort.Slice(list, func(i, j int) bool {
+		if list[i].count != list[j].count {
+			return list[i].count > list[j].count
+		}
+		return list[i].text < list[j].text
+	})
+	if len(list) > opts.PhraseTop {
+		list = list[:opts.PhraseTop]
+	}
+	out := make([]report.Entry, 0, len(list))
+	for _, c := range list {
+		out = append(out, report.Entry{
+			Kind:     "phrase",
+			Lemma:    c.text,
+			Count:    c.count,
+			Projects: c.proj,
+			Rate:     float64(c.count) / float64(w.FullTotal) * 1000,
+		})
+	}
+	return out
 }
