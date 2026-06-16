@@ -124,7 +124,7 @@ func TestRenderPhraseEntry(t *testing.T) {
 	r := &Report{Entries: []Entry{
 		{Kind: "phrase", Lemma: "i want to honor that", Count: 7, Projects: 3, Rate: 0.3},
 	}}
-	out := r.Render()
+	out := r.Render(false)
 	if !strings.Contains(out, `"i want to honor that"`) {
 		t.Errorf("phrase not rendered with its text: %q", out)
 	}
@@ -142,7 +142,7 @@ func TestRenderPhraseSingleProject(t *testing.T) {
 	r := &Report{Entries: []Entry{
 		{Kind: "phrase", Lemma: "that said", Count: 6, Projects: 1, Rate: 0.2},
 	}}
-	out := r.Render()
+	out := r.Render(false)
 	if !strings.Contains(out, "stock phrase, 6× this window") {
 		t.Errorf("single-project phrase note malformed: %q", out)
 	}
@@ -156,8 +156,8 @@ func TestRenderKnownLeanNote(t *testing.T) {
 		Kind: "chronic", Lemma: "surface", Rate: 0.5, Known: true,
 		Ladder: []Rung{{Word: "exterior", IC: 1}, {Word: "surface", IC: 5}},
 	}}}
-	if !strings.Contains(r.Render(), "a common Claude lean") {
-		t.Errorf("known-route entry must flag itself as a Claude lean:\n%s", r.Render())
+	if !strings.Contains(r.Render(false), "a common Claude lean") {
+		t.Errorf("known-route entry must flag itself as a Claude lean:\n%s", r.Render(false))
 	}
 }
 

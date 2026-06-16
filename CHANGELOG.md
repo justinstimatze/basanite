@@ -1,6 +1,12 @@
 # Changelog
 
-## Unreleased — the known-tics reference (Claude Bingo)
+## v0.4.0 (2026-06-16) — the known-tics reference, the marked route, sparklines
+
+Three surfaces the derived deterministic signals couldn't reach: a curated
+reference of common Claude leans, a route for live-metaphor tics the
+frequency/rarity ranking buries, and at-a-glance trend sparklines.
+
+### The known-tics reference (Claude Bingo)
 
 A curated reference of words and phrases Claude is known to lean on, shipped
 embedded in the binary as a conservative, high-precision **sample of the
@@ -20,16 +26,46 @@ stays awareness, never prohibition. Niche or personal leans go in a local
   model's tells age out), and nothing upstream re-merges what you deleted.
   Single-word lines feed the chronic detector; spaced lines are phrases.
 - **Known-tics route**: a third chronic admission route. The rarity route
-  catches words rare in general English (`substrate`, `load-bearing`); the
-  known route catches *common*-English leans it structurally can't see
-  (`surface`, `frame`, `honor`) when they're steady and dispersed. Entries
-  are labelled "a common Claude lean".
+  catches words rare in general English (`substrate`); the known route
+  catches *common*-English leans it structurally can't see (`surface`,
+  `frame`, `honor`) when they're steady and dispersed. Entries are labelled
+  "a common Claude lean".
 - **Phrase track** (`internal/phrase`): the single-token detector is blind to
   stock phrases (`i want to honor that`) — the words are individually
   unremarkable; the tic is the sequence. A matcher counts the curated phrases
   over the surface word stream (stopwords kept) and surfaces the most-used as
   awareness-only entries (no synonym ladder for a stock phrase). `report`
   gains `--phrases` / `--phrase-min`.
+
+### The marked route — live-metaphor tics
+
+Frequency-drift detection structurally misses low-frequency, high-salience
+figurative tics like `load-bearing`: its rate is modest, and every cheap
+statistic that might rank it (project spread, rarity, concreteness) is
+shared by ordinary jargon — the rarity route admits it as a candidate, but
+its modest rate keeps it out of the slots. The separating signal is
+**context-incongruity** — the cosine distance between a word's literal sense
+(its GloVe vector) and the centroid of the contexts it actually appears in.
+A live metaphor (`load-bearing`, ~1.0) is a physical word recurring in
+non-physical contexts; literal jargon (`running` 0.34, `slot` 0.60, `hook`
+0.57) stays in its home neighborhood and sinks.
+
+- `internal/pipeline`: a fourth **marked route** (after known, frame, rare)
+  gathers dispersed, rare-in-English words, ranks them by incongruity, gates
+  at a floor, and hands survivors to the existing judge — the only thing that
+  separates a live metaphor (`load-bearing → tic`) from a noisy-vector term
+  of art (`grep`, `config → suppressed`). `MarkedTop` budgets the entries;
+  `-marked` exposes it. Model-name confounds (`haiku → poem`) are dropped by
+  the existing proper-noun guard.
+
+### Sparklines
+
+- `internal/spark`: stdlib-only Unicode block sparklines (eight runes, no
+  dependency), with NaN gaps and a `↑/↓/→` direction arrow.
+- `trend` prints a per-lemma sparkline summary under the weekly table.
+- `report` records a trailing 8-week per-1k series on each entry and renders
+  an inline sparkline in the console view; the turn-start injection stays
+  compact (`Render(showSpark bool)`).
 
 ## v0.3.1 (2026-06-10)
 
