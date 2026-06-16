@@ -134,11 +134,13 @@ func Load(path string) (*Report, error) {
 	return &r, nil
 }
 
-// Render formats the turn-start injection. Tone per the design: awareness,
-// never prohibition — naming a word to suppress it is ironic-process
-// priming and backfires. The ladder reads weakest -> strongest so the move
-// can be demote, not just swap.
-func (r *Report) Render() string {
+// Render formats the report lines. Tone per the design: awareness, never
+// prohibition — naming a word to suppress it is ironic-process priming and
+// backfires. The ladder reads weakest -> strongest so the move can be demote,
+// not just swap. showSpark adds a per-entry trajectory sparkline: useful in
+// the `report` console view, kept off the turn-start injection to hold the
+// injection compact.
+func (r *Report) Render(showSpark bool) string {
 	if len(r.Entries) == 0 {
 		return ""
 	}
@@ -170,8 +172,10 @@ func (r *Report) Render() string {
 			line += " — " + e.JudgeNote
 		}
 		head := e.Lemma
-		if s := e.sparkline(); s != "" {
-			head += " " + s
+		if showSpark {
+			if s := e.sparkline(); s != "" {
+				head += " " + s
+			}
 		}
 		fmt.Fprintf(&b, "  %s (%s): %s\n", head, e.note(), line)
 		rendered++

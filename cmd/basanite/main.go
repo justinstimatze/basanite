@@ -470,7 +470,7 @@ func runReport(args []string) error {
 		return err
 	}
 	fmt.Printf("report: %d entries (judge %s)\n", len(rep.Entries), judgeStatus)
-	if s := rep.Render(); s != "" {
+	if s := rep.Render(true); s != "" { // console view: show the trajectory sparklines
 		fmt.Print(s)
 	}
 	// Always surface where the editable list lives and how big it is, so the
@@ -628,7 +628,7 @@ func runHook(args []string) error {
 	if err != nil || rep == nil || time.Since(rep.GeneratedAt) > *maxAge {
 		return nil
 	}
-	out := rep.Render()
+	out := rep.Render(false) // injection stays compact: no sparklines
 	if out == "" {
 		return nil
 	}

@@ -105,7 +105,7 @@ func TestTrimLadderFallbackWhenLemmaMissing(t *testing.T) {
 }
 
 func TestRenderDemoteOnlyAndTrimmed(t *testing.T) {
-	out := sample().Render()
+	out := sample().Render(false)
 	if strings.Contains(out, "broker") {
 		t.Error("rungs above the target must not render")
 	}
@@ -115,7 +115,7 @@ func TestRenderDemoteOnlyAndTrimmed(t *testing.T) {
 	if !strings.Contains(out, "functionary < official < negotiator < representative < [agent]") {
 		t.Errorf("unexpected render:\n%s", out)
 	}
-	if (&Report{}).Render() != "" {
+	if (&Report{}).Render(false) != "" {
 		t.Error("empty report must render to empty string")
 	}
 }
@@ -177,7 +177,10 @@ func TestSparklineRendersGapsAndDirection(t *testing.T) {
 
 	r := sample()
 	r.Entries[0].Spark = []float64{3, 2, 1}
-	if !strings.Contains(r.Render(), "↓") {
-		t.Error("a falling entry series should surface a ↓ in the render")
+	if !strings.Contains(r.Render(true), "↓") {
+		t.Error("a falling entry series should surface a ↓ when showSpark is true")
+	}
+	if strings.Contains(r.Render(false), "↓") {
+		t.Error("the injection (showSpark false) must omit sparklines")
 	}
 }
