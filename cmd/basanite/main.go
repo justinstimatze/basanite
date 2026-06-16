@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -25,6 +26,7 @@ import (
 	"github.com/justinstimatze/basanite/internal/phrase"
 	"github.com/justinstimatze/basanite/internal/pipeline"
 	"github.com/justinstimatze/basanite/internal/report"
+	"github.com/justinstimatze/basanite/internal/spark"
 	"github.com/justinstimatze/basanite/internal/text"
 	"github.com/justinstimatze/basanite/internal/wordnet"
 )
@@ -198,7 +200,44 @@ func runTrend(args []string) error {
 		}
 		fmt.Fprintln(w)
 	}
-	return w.Flush()
+	if err := w.Flush(); err != nil {
+		return err
+	}
+
+	// Per-lemma sparkline summary: the weekly table read left-to-right as
+	// shape, with the endpoint rates and a direction arrow. A bucket with no
+	// tokens is a gap (NaN), so dead weeks read as holes, not zeros.
+	sw := tabwriter.NewWriter(os.Stdout, 2, 8, 2, ' ', 0)
+	fmt.Fprintln(sw)
+	for i, l := range lemmas {
+		series := make([]float64, *weeks)
+		for b := 0; b < *weeks; b++ {
+			if totals[b] == 0 {
+				series[b] = math.NaN()
+				continue
+			}
+			series[b] = float64(counts[b][i]) / float64(totals[b]) * 1000
+		}
+		first, last := firstLastPresent(series)
+		fmt.Fprintf(sw, "%s\t%s\t%s\t%.2f → %.2f/1k\n", l, spark.Line(series), spark.Trend(series), first, last)
+	}
+	return sw.Flush()
+}
+
+// firstLastPresent returns the first and last non-NaN values of a series,
+// for the sparkline's numeric endpoints; 0,0 when the series is all gaps.
+func firstLastPresent(vals []float64) (first, last float64) {
+	have := false
+	for _, v := range vals {
+		if math.IsNaN(v) {
+			continue
+		}
+		if !have {
+			first, have = v, true
+		}
+		last = v
+	}
+	return first, last
 }
 
 // defaultDataDir finds the WordNet data assets: $BASANITE_DATA, then
