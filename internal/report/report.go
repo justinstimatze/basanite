@@ -6,10 +6,13 @@ package report
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/justinstimatze/basanite/internal/spark"
 )
 
 // Rung is one surviving candidate on an entry's ladder.
@@ -27,22 +30,23 @@ type Rung struct {
 // known-tics match); "phrase" is an awareness-only stock-phrase entry with
 // no ladder, where Lemma holds the phrase text.
 type Entry struct {
-	Kind         string  `json:"kind,omitempty"`
-	Lemma        string  `json:"lemma"`
-	RecentCount  int     `json:"recent_count,omitempty"`
-	Ratio        float64 `json:"ratio,omitempty"`
-	Rate         float64 `json:"rate,omitempty"`       // per-1k rate (full window for chronic/phrase)
-	FrameFrac    float64 `json:"frame_frac,omitempty"` // share of uses in the "<det> X of" frame
-	Rarity       float64 `json:"rarity,omitempty"`     // WordIC, set when the rare-word route flagged it
-	Known        bool    `json:"known,omitempty"`      // admitted via the curated known-tics route
-	Count        int     `json:"count,omitempty"`      // phrase: full-window occurrences
-	Projects     int     `json:"projects,omitempty"`   // phrase: distinct projects it appears in
-	JudgeRole    string  `json:"judge_role,omitempty"` // tic|mixed when the LLM gate ran (term_of_art entries are dropped, never stored)
-	JudgeNote    string  `json:"judge_note,omitempty"` // the gate's one-clause awareness payload
-	DemoteTo     string  `json:"demote_to,omitempty"`  // the gate's chosen rung, when it named one
-	ClusterDelta float64 `json:"cluster_delta"`        // vs corpus baseline; >0 = tic-like
-	Uses         int     `json:"uses"`
-	Ladder       []Rung  `json:"ladder"` // weakest -> strongest, includes the lemma itself
+	Kind         string    `json:"kind,omitempty"`
+	Lemma        string    `json:"lemma"`
+	RecentCount  int       `json:"recent_count,omitempty"`
+	Ratio        float64   `json:"ratio,omitempty"`
+	Rate         float64   `json:"rate,omitempty"`       // per-1k rate (full window for chronic/phrase)
+	FrameFrac    float64   `json:"frame_frac,omitempty"` // share of uses in the "<det> X of" frame
+	Rarity       float64   `json:"rarity,omitempty"`     // WordIC, set when the rare-word route flagged it
+	Known        bool      `json:"known,omitempty"`      // admitted via the curated known-tics route
+	Count        int       `json:"count,omitempty"`      // phrase: full-window occurrences
+	Projects     int       `json:"projects,omitempty"`   // phrase: distinct projects it appears in
+	JudgeRole    string    `json:"judge_role,omitempty"` // tic|mixed when the LLM gate ran (term_of_art entries are dropped, never stored)
+	JudgeNote    string    `json:"judge_note,omitempty"` // the gate's one-clause awareness payload
+	DemoteTo     string    `json:"demote_to,omitempty"`  // the gate's chosen rung, when it named one
+	ClusterDelta float64   `json:"cluster_delta"`        // vs corpus baseline; >0 = tic-like
+	Uses         int       `json:"uses"`
+	Ladder       []Rung    `json:"ladder"`          // weakest -> strongest, includes the lemma itself
+	Spark        []float64 `json:"spark,omitempty"` // trailing weekly per-1k rates, oldest -> newest; -1 marks a gap (no tokens that week)
 }
 
 // Report is the persisted pipeline output.
@@ -165,13 +169,35 @@ func (r *Report) Render() string {
 		if e.JudgeNote != "" {
 			line += " — " + e.JudgeNote
 		}
-		fmt.Fprintf(&b, "  %s (%s): %s\n", e.Lemma, e.note(), line)
+		head := e.Lemma
+		if s := e.sparkline(); s != "" {
+			head += " " + s
+		}
+		fmt.Fprintf(&b, "  %s (%s): %s\n", head, e.note(), line)
 		rendered++
 	}
 	if rendered == 0 {
 		return ""
 	}
 	return b.String()
+}
+
+// sparkline renders the entry's trailing weekly series as a block sparkline
+// plus a direction arrow, or "" when no series was recorded. The stored -1
+// gap sentinel becomes a NaN so dead weeks read as holes, not zeros.
+func (e Entry) sparkline() string {
+	if len(e.Spark) == 0 {
+		return ""
+	}
+	vals := make([]float64, len(e.Spark))
+	for i, v := range e.Spark {
+		if v < 0 {
+			vals[i] = math.NaN()
+		} else {
+			vals[i] = v
+		}
+	}
+	return spark.Line(vals) + " " + spark.Trend(vals)
 }
 
 // note is the per-entry evidence summary in the rendered line.

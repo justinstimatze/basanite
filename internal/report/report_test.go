@@ -160,3 +160,24 @@ func TestRenderKnownLeanNote(t *testing.T) {
 		t.Errorf("known-route entry must flag itself as a Claude lean:\n%s", r.Render())
 	}
 }
+
+func TestSparklineRendersGapsAndDirection(t *testing.T) {
+	if (Entry{}).sparkline() != "" {
+		t.Error("no series should render to empty string")
+	}
+	// rising with a mid-series gap (-1): the gap is a space, direction is up
+	e := Entry{Spark: []float64{1, -1, 2, 4}}
+	got := e.sparkline()
+	if !strings.Contains(got, " ") {
+		t.Errorf("gap (-1) should render as a space: %q", got)
+	}
+	if !strings.HasSuffix(got, "↑") {
+		t.Errorf("rising series should end with ↑: %q", got)
+	}
+
+	r := sample()
+	r.Entries[0].Spark = []float64{3, 2, 1}
+	if !strings.Contains(r.Render(), "↓") {
+		t.Error("a falling entry series should surface a ↓ in the render")
+	}
+}

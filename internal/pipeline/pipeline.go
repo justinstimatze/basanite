@@ -583,6 +583,7 @@ func Build(turns []corpus.Turn, wn *wordnet.DB, loadVectors VectorLoader, jdg ju
 		}
 	}
 	rep.Entries = append(rep.Entries, phrases...)
+	attachSparklines(rep, turns, now, sparkWeeks)
 	return rep, nil
 }
 
@@ -628,4 +629,59 @@ func phraseEntries(w Windows, opts Options) []report.Entry {
 		})
 	}
 	return out
+}
+
+// sparkWeeks is how many trailing 7-day buckets each entry's sparkline spans.
+const sparkWeeks = 8
+
+// attachSparklines records a trailing weekly per-1k rate series on every
+// non-phrase entry, for the render-time sparkline. One pass over the turns
+// buckets the entry lemmas by week; a week with no tokens is stored as -1 (a
+// gap), which keeps the series valid JSON where a NaN would not. Phrase
+// entries are skipped: their multi-word lemma never matches a single token, so
+// a series would be all gaps. Bucketing matches the trend command: fixed
+// 7-day windows counted back from now.
+func attachSparklines(rep *report.Report, turns []corpus.Turn, now time.Time, weeks int) {
+	if len(rep.Entries) == 0 {
+		return
+	}
+	const week = 7 * 24 * time.Hour
+	idx := make(map[string]int, len(rep.Entries))
+	for i, e := range rep.Entries {
+		if e.Kind == "phrase" {
+			continue
+		}
+		idx[e.Lemma] = i
+	}
+	counts := make([][]int, weeks)
+	for b := range counts {
+		counts[b] = make([]int, len(rep.Entries))
+	}
+	totals := make([]int, weeks)
+	for _, t := range turns {
+		b := weeks - 1 - int(now.Sub(t.Time)/week)
+		if b < 0 || b >= weeks {
+			continue
+		}
+		for _, tok := range text.Tokens(t.Text) {
+			totals[b]++
+			if i, ok := idx[tok]; ok {
+				counts[b][i]++
+			}
+		}
+	}
+	for i := range rep.Entries {
+		if rep.Entries[i].Kind == "phrase" {
+			continue
+		}
+		series := make([]float64, weeks)
+		for b := 0; b < weeks; b++ {
+			if totals[b] == 0 {
+				series[b] = -1 // gap sentinel; render turns this back into a hole
+				continue
+			}
+			series[b] = float64(counts[b][i]) / float64(totals[b]) * 1000
+		}
+		rep.Entries[i].Spark = series
+	}
 }
