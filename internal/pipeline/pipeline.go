@@ -169,6 +169,7 @@ type Options struct {
 	Threshold                float64         // cosine floor for a clean substitution
 	MinClean                 float64         // clean fraction a rung needs to survive
 	ChronicTop               int             // max chronic entries to add after the risers
+	MarkedTop                int             // max marked entries (concrete figurative tics) to add; 0 disables
 	MinChronicRate           float64         // per-1k full-window rate floor for chronic candidates
 	RarityFloor              float64         // WordIC (SemCor -ln p) floor for the rare-word chronic route
 	ProperNouns              map[string]bool // lemmas to suppress outright — known project/tool names a frequency+sense pass mistakes for tics
@@ -203,7 +204,54 @@ const (
 	// fallbackCleanFloor bounds the chronic empty-ladder fallback: rungs
 	// below it are wrong-sense artifacts, not weakly-supported substitutes.
 	fallbackCleanFloor = 0.3
+	// markedIncongFloor gates the marked route on context-incongruity: the
+	// cosine distance between a word's literal sense (its GloVe vector) and
+	// the centroid of the contexts it actually appears in. A live metaphor
+	// (load-bearing, measured at 1.00) is a physical word recurring in
+	// non-physical contexts, so its sense and its contexts diverge sharply;
+	// literal jargon (running 0.34, slot 0.60, hook 0.57) is used in its home
+	// neighborhood, so they agree. The floor is a recall net — it keeps the
+	// figurative candidates and drops the literal ones with no seeding — and
+	// hands survivors to the judge, the only thing that separates a live
+	// metaphor (load-bearing -> tic) from a noisy-vector term of art (grep,
+	// config -> suppressed). Set below load-bearing's 1.00 with margin for
+	// less-extreme metaphors, above the literal-jargon cluster (~0.3-0.7).
+	markedIncongFloor = 0.85
 )
+
+// markParts splits a lemma into its hyphen/underscore components, for the
+// GloVe fallback when the compound itself is out of vocabulary (load-bearing
+// -> mean(load, bearing)).
+func markParts(lemma string) []string {
+	return strings.FieldsFunc(lemma, func(r rune) bool { return r == '-' || r == '_' })
+}
+
+// incongruity scores how far a lemma's literal sense sits from the contexts
+// it appears in: 1 - cos(wordVector, contextCentroid). The word vector is the
+// lemma's GloVe vector, or the mean of its parts when the compound is out of
+// vocabulary; the context centroid is the mean of every other token across
+// the lemma's sample uses. ok is false when either side is unrepresentable.
+func incongruity(tbl *embed.Table, lemma string, uses [][]string) (float64, bool) {
+	var wv []float32
+	if tbl.Has(lemma) {
+		wv = tbl.Mean([]string{lemma})
+	} else {
+		wv = tbl.Mean(markParts(lemma))
+	}
+	var ctx []string
+	for _, u := range uses {
+		for _, tok := range u {
+			if tok != lemma {
+				ctx = append(ctx, tok)
+			}
+		}
+	}
+	cv := tbl.Mean(ctx)
+	if wv == nil || cv == nil {
+		return 0, false
+	}
+	return 1 - embed.Cos(wv, cv), true
+}
 
 // VectorLoader loads unit vectors restricted to vocab. Injected so tests
 // supply a synthetic table and so Build stays ignorant of file layout.
@@ -233,6 +281,7 @@ func Build(turns []corpus.Turn, wn *wordnet.DB, loadVectors VectorLoader, jdg ju
 		frame  float64 // FrameFraction over the lemma's uses
 		rarity float64 // WordIC, set only when the rarity route admitted it
 		known  bool    // admitted via the curated known-tics route
+		incong float64 // context-incongruity, set for marked candidates post-vectors
 		uses   [][]string
 		cands  []string
 		candIC map[string]float64
@@ -327,6 +376,49 @@ func Build(turns []corpus.Turn, wn *wordnet.DB, loadVectors VectorLoader, jdg ju
 				continue
 			}
 			j.kind, j.rate = "chronic", c.rate
+			flagged[c.lemma] = true // dedupe: keep the marked route off chronic words
+			jobs = append(jobs, j)
+		}
+	}
+
+	// Marked stage: concrete-vehicle figurative tics (load-bearing) that the
+	// frequency-, spread-, and rarity-ranked routes all bury, because their
+	// rate is modest and every cheap statistic that separates them from
+	// ordinary jargon (rare, concrete, dispersed) is shared by dead-metaphor
+	// terms of art (hook, stack). The split is semantic, so the net is wide
+	// (dispersed + rare-in-English + concrete) and the judge is the
+	// discriminator: it keeps the live metaphors and drops the terms of art.
+	// Concreteness needs vectors, so it is applied in the vector loop; here we
+	// only gather the rare-and-dispersed candidates and order them by rate so
+	// the highest-rate confirmed tics surface first within the MarkedTop slots.
+	if opts.MarkedTop > 0 && w.FullTotal > 0 {
+		type cand struct {
+			lemma string
+			rate  float64
+		}
+		var list []cand
+		for lemma, n := range w.Full {
+			rate := float64(n) / float64(w.FullTotal) * 1000
+			if rate < opts.MinChronicRate || flagged[lemma] || len(w.FullProjects[lemma]) < chronicMinProjects {
+				continue
+			}
+			if len(lemma) < chronicMinRareLen || wn.WordIC(lemma) < opts.RarityFloor {
+				continue
+			}
+			list = append(list, cand{lemma, rate})
+		}
+		sort.Slice(list, func(i, j int) bool {
+			if list[i].rate != list[j].rate {
+				return list[i].rate > list[j].rate
+			}
+			return list[i].lemma < list[j].lemma
+		})
+		for _, c := range list {
+			j, ok := prepare(c.lemma)
+			if !ok {
+				continue
+			}
+			j.kind, j.rate, j.rarity = "marked", c.rate, wn.WordIC(c.lemma)
 			jobs = append(jobs, j)
 		}
 	}
@@ -345,29 +437,74 @@ func Build(turns []corpus.Turn, wn *wordnet.DB, loadVectors VectorLoader, jdg ju
 		return rep, nil // quiet window: skip the vector scan entirely
 	}
 
+	// The marked route's incongruity score needs each candidate compound's
+	// parts (load-bearing -> load, bearing) in the table for the out-of-vocab
+	// fallback; the context tokens are already corpus words, hence in vocab.
+	for _, j := range jobs {
+		if j.kind == "marked" {
+			for _, p := range markParts(j.lemma) {
+				vocab[p] = true
+			}
+		}
+	}
+
 	tbl, err := loadVectors(vocab)
 	if err != nil {
 		return nil, err
 	}
 	base := cloze.Variance(tbl, baselineUses, "")
 
-	// The known route earns its own output budget so curated leans aren't
-	// crowded out by frame/rarity finds (each route admitted up to ChronicTop
-	// jobs upstream; this caps what reaches the report).
-	chronicAdded, knownAdded := 0, 0
+	// Score and order the marked candidates by context-incongruity now that
+	// vectors are loaded: the live metaphors rise, the literal jargon sinks.
+	// The marked jobs are a contiguous suffix (gathered last), so sorting that
+	// slice puts the most-figurative candidates first for the judge to vet.
+	firstMarked := -1
+	for i := range jobs {
+		if jobs[i].kind == "marked" {
+			if firstMarked < 0 {
+				firstMarked = i
+			}
+			jobs[i].incong, _ = incongruity(tbl, jobs[i].lemma, jobs[i].uses)
+		}
+	}
+	if firstMarked >= 0 {
+		ms := jobs[firstMarked:]
+		sort.SliceStable(ms, func(a, b int) bool { return ms[a].incong > ms[b].incong })
+	}
+
+	// Each route earns its own output budget so curated leans (known) and
+	// figurative tics (marked) aren't crowded out by frame/rarity finds.
+	added := map[string]int{}
 	for _, j := range jobs {
 		if j.kind == "chronic" {
+			bucket := "chronic"
 			if j.known {
-				if knownAdded >= opts.ChronicTop {
-					continue
-				}
-			} else if chronicAdded >= opts.ChronicTop {
+				bucket = "known"
+			}
+			if added[bucket] >= opts.ChronicTop {
 				continue
 			}
 		}
+		if j.kind == "marked" {
+			if added["marked"] >= opts.MarkedTop {
+				continue
+			}
+			// Recall net: keep the figurative candidates (high sense/context
+			// divergence), drop the literal ones, before spending a ladder vet
+			// or a judge call. The judge then drops the noisy-vector terms of
+			// art that incongruity admits for the wrong reason (grep, config).
+			if j.incong <= markedIncongFloor {
+				continue
+			}
+		}
+		isChronic := j.kind == "chronic" || j.kind == "marked"
 		v := cloze.Variance(tbl, j.uses, j.lemma)
+		kind := j.kind
+		if kind == "marked" {
+			kind = "chronic" // a marked tic is a chronic; render and note it as one
+		}
 		e := report.Entry{
-			Kind:         j.kind,
+			Kind:         kind,
 			Lemma:        j.lemma,
 			RecentCount:  j.riser.RecentCount,
 			Ratio:        j.riser.Ratio,
@@ -379,7 +516,7 @@ func Build(turns []corpus.Turn, wn *wordnet.DB, loadVectors VectorLoader, jdg ju
 			Uses:         v.Uses,
 		}
 		cleanFloor := opts.MinClean
-		if j.kind == "chronic" && cleanFloor < chronicCleanFloor {
+		if isChronic && cleanFloor < chronicCleanFloor {
 			cleanFloor = chronicCleanFloor
 		}
 		ranked := cloze.RankSubstitutes(tbl, j.uses, j.lemma, j.cands, opts.Threshold)
@@ -389,7 +526,7 @@ func Build(turns []corpus.Turn, wn *wordnet.DB, loadVectors VectorLoader, jdg ju
 			}
 			e.Ladder = append(e.Ladder, report.Rung{Word: c.Word, IC: j.candIC[c.Word], Clean: c.Clean, Total: c.Total})
 		}
-		if len(e.Ladder) == 0 && j.kind == "chronic" {
+		if len(e.Ladder) == 0 && isChronic {
 			// A chronic word already passed strong evidence gates (rate +
 			// dispersion + frame/rarity); the clean cliff must not silence
 			// the flag entirely — keep the two best-fitting candidates that
@@ -436,12 +573,13 @@ func Build(turns []corpus.Turn, wn *wordnet.DB, loadVectors VectorLoader, jdg ju
 		}
 
 		rep.Entries = append(rep.Entries, e)
-		if j.kind == "chronic" {
-			if j.known {
-				knownAdded++
-			} else {
-				chronicAdded++
-			}
+		switch {
+		case j.kind == "chronic" && j.known:
+			added["known"]++
+		case j.kind == "chronic":
+			added["chronic"]++
+		case j.kind == "marked":
+			added["marked"]++
 		}
 	}
 	rep.Entries = append(rep.Entries, phrases...)

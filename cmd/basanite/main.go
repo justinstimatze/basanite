@@ -362,7 +362,7 @@ func defaultReportOptions() pipeline.Options {
 		Top: 8, MinCount: 10, MinRatio: 2.0,
 		MaxUses: 50, MinUses: 5,
 		Threshold: 0.97, MinClean: 0.4,
-		ChronicTop: 4, MinChronicRate: 0.2, RarityFloor: 10.5,
+		ChronicTop: 4, MarkedTop: 6, MinChronicRate: 0.2, RarityFloor: 10.5,
 		PhraseTop: 4, MinPhraseCount: 5,
 	}
 }
@@ -386,6 +386,7 @@ func runReport(args []string) error {
 		threshold     = fs.Float64("threshold", def.Threshold, "cosine floor for a clean substitution")
 		minClean      = fs.Float64("clean", def.MinClean, "minimum clean-substitution fraction for a rung to survive")
 		chronicTop    = fs.Int("chronic", def.ChronicTop, "max chronic (steady high-rate) entries; 0 disables")
+		markedTop     = fs.Int("marked", def.MarkedTop, "max marked (concrete figurative tic, e.g. load-bearing) entries; 0 disables")
 		chronicRate   = fs.Float64("chronic-rate", def.MinChronicRate, "per-1k full-window rate floor for chronic candidates")
 		chronicRarity = fs.Float64("chronic-rarity", def.RarityFloor, "SemCor WordIC floor for the rare-word chronic route")
 		phraseTop     = fs.Int("phrases", def.PhraseTop, "max stock-phrase entries from the known-tics reference; 0 disables")
@@ -400,6 +401,7 @@ func runReport(args []string) error {
 	def.MaxUses, def.Threshold, def.MinClean = *maxUses, *threshold, *minClean
 	def.ChronicTop, def.MinChronicRate, def.RarityFloor = *chronicTop, *chronicRate, *chronicRarity
 	def.PhraseTop, def.MinPhraseCount = *phraseTop, *phraseMin
+	def.MarkedTop = *markedTop
 
 	// The judge is the default: the deterministic-only report is the one that
 	// confidently mis-suggests synonyms for terms of art (hook -> snare), the
