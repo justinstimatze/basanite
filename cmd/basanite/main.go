@@ -624,32 +624,101 @@ func runHook(args []string) error {
 		}
 		*path = p
 	}
-	rep, err := report.Load(*path)
-	if err != nil || rep == nil || time.Since(rep.GeneratedAt) > *maxAge {
-		return nil
-	}
-	out := rep.Render(false) // injection stays compact: no sparklines
-	if out == "" {
-		return nil
-	}
-
-	// once per session: a marker file keyed by session id
 	dir, err := report.StateDir()
 	if err != nil {
 		return nil
 	}
-	// O_EXCL makes create-if-absent atomic: concurrent prompts in a fresh
-	// session race here, and exactly one of them gets to inject
-	marker := filepath.Join(dir, "injected-"+in.SessionID)
-	f, err := os.OpenFile(marker, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	rep, err := report.Load(*path)
 	if err != nil {
-		return nil // marker exists (already injected) or dir unwritable: silent
+		return nil
 	}
-	f.WriteString(time.Now().Format(time.RFC3339))
-	f.Close()
+	var out string
+	switch {
+	case rep == nil:
+		// No report at all: basanite isn't set up here. Stay silent rather
+		// than nag someone who never opted in.
+		return nil
+	case time.Since(rep.GeneratedAt) > *maxAge:
+		// The report exists but has gone stale — the SessionStart refresh
+		// has been failing. Surface a breadcrumb instead of silently serving
+		// nothing, so a broken pipeline can't rot invisibly for weeks.
+		out = staleNote(rep.GeneratedAt, dir)
+	default:
+		out = rep.Render(false) // injection stays compact: no sparklines
+	}
+	if out == "" {
+		return nil
+	}
+
+	// Once per session, then again only after reinjectInterval: a long or
+	// compacted session drops the turn-start block it was handed, so let the
+	// awareness resurface rather than staying dark for the rest of it.
+	marker := filepath.Join(dir, "injected-"+in.SessionID)
+	if !claimInjection(marker, reinjectInterval) {
+		return nil // injected recently in this session: silent
+	}
 	pruneMarkers(dir)
 	fmt.Print(out)
 	return nil
+}
+
+// reinjectInterval bounds how often a single session re-injects. The marker
+// used to be permanent (inject exactly once, ever), but a long or compacted
+// session loses the turn-start context it injected — so after this long the
+// awareness is allowed to surface again.
+const reinjectInterval = 4 * time.Hour
+
+// claimInjection reports whether this call should inject and, on a yes,
+// stamps the marker's clock. True when the marker is absent (the session's
+// first prompt) or older than interval (an earlier injection has aged out of
+// a long session). O_EXCL keeps concurrent first-prompts to a single
+// injector; the aged-out path tolerates a rare double-inject (one extra
+// block after hours) rather than carry a lock.
+func claimInjection(marker string, interval time.Duration) bool {
+	f, err := os.OpenFile(marker, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err == nil {
+		f.WriteString(time.Now().Format(time.RFC3339))
+		f.Close()
+		return true
+	}
+	if !os.IsExist(err) {
+		return false // dir unwritable
+	}
+	fi, err := os.Stat(marker)
+	if err != nil || time.Since(fi.ModTime()) < interval {
+		return false
+	}
+	now := time.Now()
+	return os.Chtimes(marker, now, now) == nil
+}
+
+// staleNote is the breadcrumb injected when the report has aged past
+// max-age: the SessionStart refresh has been failing and serving nothing
+// hides that. It names the age and the last refresh error so the rot is
+// visible instead of silent.
+func staleNote(generatedAt time.Time, stateDir string) string {
+	days := int(time.Since(generatedAt).Hours() / 24)
+	msg := fmt.Sprintf("basanite: word-tic state is %dd stale — the background refresh isn't updating it; run `basanite refresh` or check its data setup.", days)
+	if e := lastRefreshError(stateDir); e != "" {
+		msg += " Last refresh error: " + e
+	}
+	return msg + "\n"
+}
+
+// lastRefreshError returns the message from the most recent error line in
+// refresh.log, or "" when the log is absent or clean.
+func lastRefreshError(stateDir string) string {
+	b, err := os.ReadFile(filepath.Join(stateDir, "refresh.log"))
+	if err != nil {
+		return ""
+	}
+	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if idx := strings.Index(lines[i], "error:"); idx >= 0 {
+			return strings.TrimSpace(lines[i][idx:])
+		}
+	}
+	return ""
 }
 
 // validSessionID accepts the shapes Claude Code emits (UUID-like) and

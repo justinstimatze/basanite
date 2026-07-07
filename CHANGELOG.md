@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.4.1 (2026-07-07) — the mirror can't go dark silently
+
+Three fixes to the turn-start loop after finding it had silently stopped
+injecting for weeks: the SessionStart `refresh` was failing every run
+(`defaultDataDir` only resolves the relative `data/` when cwd is the repo
+root, but the hook runs from an arbitrary session cwd), the hook fail-closes
+on a report past `max-age`, and so a stale report served nothing with no
+signal that anything was wrong.
+
+- **Visible-stale breadcrumb**: when the report has aged past `max-age`, the
+  hook now injects a one-line note (age + the last `refresh.log` error)
+  instead of silently injecting nothing. A missing report still stays silent
+  — that's "not set up", not "broken". Converts a silent multi-week rot into
+  a visible one.
+- **Re-inject in long sessions**: the once-per-session marker was permanent,
+  so a long or compacted session lost the turn-start block it was handed and
+  never got it back. The marker is now time-boxed (`reinjectInterval`, 4h):
+  awareness resurfaces rather than staying dark for the rest of a session.
+- **Data setup**: the SessionStart `refresh` (already an `async` hook) only
+  self-maintains if it can find its data from any cwd. Install the assets
+  where the hook looks (`~/.local/share/basanite`, e.g. a symlink to the
+  repo `data/`) so regeneration runs unattended.
+
 ## v0.4.0 (2026-06-16) — the known-tics reference, the marked route, sparklines
 
 Three surfaces the derived deterministic signals couldn't reach: a curated
