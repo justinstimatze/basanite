@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.4.2 (2026-07-14) — the effectiveness ledger
+
+`trend` could always show a tic's rate falling, but nothing wrote it down —
+"is basanite working?" meant eyeballing a chart and trusting memory. The
+ledger records the before/after so the answer is a lookup, not a vibe.
+
+- **`ledger` command + `internal/report` `Ledger`**: a persisted
+  (`ledger.json`, beside the report) map of every flagged lemma to its
+  cross-refresh history — when it was first flagged, its rate then and now,
+  and whether it has since faded out. `basanite ledger` renders it
+  still-flagged-first (longest-standing tics on top), then faded-out, each
+  with the rate delta and a ↓/↑/→ arrow.
+- **Updated automatically**: `buildAndSave` folds each report into the ledger
+  as a best-effort side effect, so it accrues through the existing
+  SessionStart `refresh` hook — no new thing to remember to run. A ledger
+  failure never fails the build; it's a reassurance record, not part of the
+  turn-start loop.
+- The stamp is a *true first*: a faded tic that reappears keeps its original
+  `first_flagged`, so "since" always means the first sighting. It's a
+  recorded before/after, not a causality proof — direct callouts and topic
+  drift stay unmeasured confounds, and the render says so.
+
 ## v0.4.1 (2026-07-07) — the mirror can't go dark silently
 
 Three fixes to the turn-start loop after finding it had silently stopped

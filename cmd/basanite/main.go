@@ -44,6 +44,7 @@ usage: basanite <command> [flags]
   report          full pipeline (scan→vet→ladder) → state file
   refresh         regenerate the state file if stale (SessionStart entry)
   hook            UserPromptSubmit entry: inject the report
+  ledger          flagged tics over time — is a tic's rate falling?
   version         print version
 
 Run 'basanite <command> -h' for command flags. See README.md for data setup.
@@ -73,6 +74,8 @@ func main() {
 		err = runRefresh(args)
 	case "hook":
 		err = runHook(args)
+	case "ledger":
+		err = runLedger(args)
 	case "version", "--version", "-v":
 		fmt.Println("basanite", buildVersion())
 	case "help", "--help", "-h":
@@ -514,7 +517,23 @@ func buildAndSave(dir, dataDir, out string, vetDays int, jdg judge.Judger, opts 
 	if err := rep.Save(out); err != nil {
 		return nil, err
 	}
+	recordLedger(rep, filepath.Dir(out), now)
 	return rep, nil
+}
+
+// recordLedger folds this refresh into the persisted before/after ledger,
+// beside the report. Best-effort: a ledger failure must never fail the
+// build — the ledger is a reassurance record, not part of the turn-start
+// loop, so a corrupt or unwritable ledger is dropped silently rather than
+// blocking a report the hook depends on.
+func recordLedger(rep *report.Report, dir string, now time.Time) {
+	path := filepath.Join(dir, report.LedgerName)
+	l, err := report.LoadLedger(path)
+	if err != nil {
+		return
+	}
+	l.Update(rep, now)
+	_ = l.Save(path)
 }
 
 // runRefresh is the SessionStart entry point: regenerate the report in the
@@ -576,6 +595,32 @@ func runRefresh(args []string) error {
 		status = fmt.Sprintf("%s error: %v\n", time.Now().Format(time.RFC3339), err)
 	}
 	os.WriteFile(filepath.Join(stateDir, "refresh.log"), []byte(status), 0o600)
+	return nil
+}
+
+// runLedger prints the persisted before/after record of every flagged tic:
+// when it was first flagged, its rate then and now, and whether it has faded
+// out. This is the "is basanite working?" surface — recorded rate-over-time
+// instead of eyeballing a single trend chart.
+func runLedger(args []string) error {
+	fs := flag.NewFlagSet("ledger", flag.ContinueOnError)
+	path := fs.String("ledger", "", "ledger file (default: state dir)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	p := *path
+	if p == "" {
+		lp, err := report.LedgerPath()
+		if err != nil {
+			return err
+		}
+		p = lp
+	}
+	l, err := report.LoadLedger(p)
+	if err != nil {
+		return err
+	}
+	fmt.Print(l.Render(time.Now()))
 	return nil
 }
 
