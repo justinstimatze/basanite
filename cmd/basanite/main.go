@@ -644,8 +644,10 @@ func runHook(args []string) error {
 	fs := flag.NewFlagSet("hook", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	var (
-		path   = fs.String("report", "", "report path (default: state dir)")
-		maxAge = fs.Duration("max-age", 7*24*time.Hour, "ignore reports older than this")
+		path       = fs.String("report", "", "report path (default: state dir)")
+		maxAge     = fs.Duration("max-age", 7*24*time.Hour, "ignore reports older than this")
+		topWords   = fs.Int("top-words", 5, "max word entries in the injection (0 = all)")
+		topPhrases = fs.Int("top-phrases", 2, "max phrase entries in the injection (0 = all)")
 	)
 	if fs.Parse(args) != nil {
 		return nil
@@ -689,7 +691,7 @@ func runHook(args []string) error {
 		// nothing, so a broken pipeline can't rot invisibly for weeks.
 		out = staleNote(rep.GeneratedAt, dir)
 	default:
-		out = rep.Render(false) // injection stays compact: no sparklines
+		out = rep.RenderHook(*topWords, *topPhrases)
 	}
 	if out == "" {
 		return nil

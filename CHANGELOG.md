@@ -1,5 +1,23 @@
 # Changelog
 
+## unreleased — the injection earns a budget
+
+The July 2026 report carried 18 entries and 4,613 chars of judge notes into
+every injection — a wall the model skims, not awareness it holds. Measured
+against Opus 5, which Anthropic's own docs say responds to fewer, clearer
+directives, the full roster is overconstraint.
+
+- **`RenderHook(maxWords, maxPhrases)`**: the turn-start view now renders
+  the strongest 5 word entries and 2 phrase entries (`hook -top-words` /
+  `-top-phrases`; 0 = uncapped). The console `report` view still shows
+  everything — the cap is about what a model mid-task can act on, not about
+  hiding data.
+- **Judge notes cut to their first sentence at render time**: the judge
+  prompt has always asked for "one short clause" and the judge ignores it —
+  notes ran 239–519 chars, with sentences two onward restating the ladder
+  the line already shows. Deterministic truncation enforces the contract
+  the prompt could not. Live effect: 6,488 → 1,769 chars per injection.
+
 ## v0.4.2 (2026-07-14) — the effectiveness ledger
 
 `trend` could always show a tic's rate falling, but nothing wrote it down —

@@ -9,6 +9,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -132,6 +133,63 @@ func Load(path string) (*Report, error) {
 		return nil, err
 	}
 	return &r, nil
+}
+
+// RenderHook is the turn-start injection view: the strongest maxWords word
+// entries and maxPhrases phrase entries, judge notes cut to their first
+// sentence. The console view renders everything; the injection is read by a
+// model mid-task, and eighteen simultaneous vocabulary directives compete
+// with the actual work — a handful it can hold beats a wall it skims. Note
+// truncation enforces the judge prompt's own "one short clause" contract,
+// which the judge ignores: sentences two onward restate the ladder the line
+// already shows.
+func (r *Report) RenderHook(maxWords, maxPhrases int) string {
+	if maxWords <= 0 {
+		maxWords = len(r.Entries) // 0 = uncapped, the pre-cap behavior
+	}
+	if maxPhrases <= 0 {
+		maxPhrases = len(r.Entries)
+	}
+	sub := &Report{GeneratedAt: r.GeneratedAt}
+	words, phrases := 0, 0
+	for _, e := range r.Entries {
+		if e.Kind == "phrase" {
+			if phrases >= maxPhrases {
+				continue
+			}
+			phrases++
+		} else {
+			if words >= maxWords {
+				continue
+			}
+			words++
+		}
+		e.JudgeNote = firstSentence(e.JudgeNote)
+		sub.Entries = append(sub.Entries, e)
+	}
+	return sub.Render(false)
+}
+
+// noteSentenceEnd marks a sentence boundary inside a judge note: terminal
+// punctuation (optionally closing a quote or paren) followed by space and a
+// capital or opening quote. "e.g.," and "i.e.," survive because a comma, not
+// a space-plus-capital, follows their period.
+var noteSentenceEnd = regexp.MustCompile(`[.!?]["')\]]*\s+["'A-Z(]`)
+
+func firstSentence(note string) string {
+	loc := noteSentenceEnd.FindStringIndex(note)
+	if loc == nil {
+		return note
+	}
+	head := note[:loc[0]]
+	if strings.HasSuffix(strings.ToLower(head), "e.g") || strings.HasSuffix(strings.ToLower(head), "i.e") {
+		return note // the boundary was an abbreviation; keep the note whole
+	}
+	end := loc[0] + 1
+	for end < len(note) && strings.ContainsRune(`"')]`, rune(note[end])) {
+		end++
+	}
+	return note[:end]
 }
 
 // Render formats the report lines. Tone per the design: awareness, never

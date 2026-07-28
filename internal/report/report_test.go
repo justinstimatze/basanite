@@ -184,3 +184,63 @@ func TestSparklineRendersGapsAndDirection(t *testing.T) {
 		t.Error("the injection (showSpark false) must omit sparklines")
 	}
 }
+
+// The hook view exists because the injection is read by a model mid-task:
+// the July 2026 report carried 18 entries and 4,613 chars of judge notes,
+// which is a wall to skim, not awareness to hold.
+func TestRenderHookCapsRoutesSeparately(t *testing.T) {
+	r := &Report{}
+	for _, w := range []string{"alpha", "beta", "gamma"} {
+		r.Entries = append(r.Entries, Entry{
+			Kind: "chronic", Lemma: w, Rate: 0.5,
+			Ladder: []Rung{{Word: "weak" + w, IC: 1}, {Word: w, IC: 5}},
+		})
+	}
+	r.Entries = append(r.Entries,
+		Entry{Kind: "phrase", Lemma: "worth noting", Count: 9, Projects: 2},
+		Entry{Kind: "phrase", Lemma: "that said", Count: 6, Projects: 2},
+	)
+	out := r.RenderHook(2, 1)
+	for _, want := range []string{"alpha", "beta", `"worth noting"`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("capped view lost %s:\n%s", want, out)
+		}
+	}
+	for _, drop := range []string{"gamma", "that said"} {
+		if strings.Contains(out, drop) {
+			t.Errorf("capped view leaked %s past its route budget:\n%s", drop, out)
+		}
+	}
+	if got := r.RenderHook(0, 0); !strings.Contains(got, "gamma") || !strings.Contains(got, "that said") {
+		t.Errorf("0 must mean uncapped, the pre-cap behavior:\n%s", got)
+	}
+}
+
+func TestRenderHookCutsNotesToOneSentence(t *testing.T) {
+	r := &Report{Entries: []Entry{{
+		Kind: "chronic", Lemma: "tracker", Rate: 0.3,
+		JudgeNote: `Used loosely to mean "record" or "log" in most sentences. When the writer says "update tracker" they often mean "log the finding", not a named system.`,
+		Ladder:    []Rung{{Word: "log", IC: 1}, {Word: "tracker", IC: 5}},
+	}}}
+	out := r.RenderHook(5, 2)
+	if !strings.Contains(out, "in most sentences.") {
+		t.Errorf("first sentence of the note must survive:\n%s", out)
+	}
+	if strings.Contains(out, "named system") {
+		t.Errorf("second sentence of the note must be cut:\n%s", out)
+	}
+}
+
+func TestFirstSentence(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{`Used as filler (e.g., "cur roadmap," "cur ask") rather than as a precise term. "Individual" better captures it.`,
+			`Used as filler (e.g., "cur roadmap," "cur ask") rather than as a precise term.`},
+		{"One clause with no terminal boundary", "One clause with no terminal boundary"},
+		{"Ends mid-list e.g. Bar and more after", "Ends mid-list e.g. Bar and more after"},
+	}
+	for _, c := range cases {
+		if got := firstSentence(c.in); got != c.want {
+			t.Errorf("firstSentence(%q):\n got %q\nwant %q", c.in, got, c.want)
+		}
+	}
+}
