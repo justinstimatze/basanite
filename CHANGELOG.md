@@ -1,6 +1,6 @@
 # Changelog
 
-## unreleased — the injection earns a budget
+## v0.5.0 (2026-07-28) — the injection earns a budget
 
 The July 2026 report carried 18 entries and 4,613 chars of judge notes into
 every injection — a wall the model skims, not awareness it holds. Measured
