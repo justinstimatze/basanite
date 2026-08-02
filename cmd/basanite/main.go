@@ -22,6 +22,7 @@ import (
 	"github.com/justinstimatze/basanite/internal/detect"
 	"github.com/justinstimatze/basanite/internal/display"
 	"github.com/justinstimatze/basanite/internal/embed"
+	"github.com/justinstimatze/basanite/internal/install"
 	"github.com/justinstimatze/basanite/internal/judge"
 	"github.com/justinstimatze/basanite/internal/knowntics"
 	"github.com/justinstimatze/basanite/internal/phrase"
@@ -46,6 +47,7 @@ usage: basanite <command> [flags]
   refresh         regenerate the state file if stale (SessionStart entry)
   hook            UserPromptSubmit entry: inject the report
   display         MessageDisplay entry: show the demote rung instead of the tic
+  install         register the hooks in ~/.claude/settings.json (-status, -uninstall)
   ledger          flagged tics over time — is a tic's rate falling?
   version         print version
 
@@ -76,6 +78,8 @@ func main() {
 		err = runRefresh(args)
 	case "hook":
 		err = runHook(args)
+	case "install":
+		err = runInstall(args)
 	case "display":
 		err = runDisplay(args)
 	case "ledger":
@@ -602,6 +606,72 @@ func runRefresh(args []string) error {
 	return nil
 }
 
+// runInstall registers the three hooks in the user's Claude Code settings.
+// The binary knows its own absolute path, which is the part the README could
+// only ever write as "/home/you/go/bin/basanite" and the user had to paste
+// into nested JSON three times.
+func runInstall(args []string) error {
+	fs := flag.NewFlagSet("install", flag.ContinueOnError)
+	var (
+		path      = fs.String("settings", "", "settings file (default: ~/.claude/settings.json)")
+		dryRun    = fs.Bool("dry-run", false, "print what would change and write nothing")
+		uninstall = fs.Bool("uninstall", false, "remove basanite's hooks")
+		status    = fs.Bool("status", false, "show what is registered right now")
+	)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *path == "" {
+		p, err := install.DefaultPath()
+		if err != nil {
+			return err
+		}
+		*path = p
+	}
+	settings, err := install.Load(*path)
+	if err != nil {
+		return err
+	}
+
+	// A tracker is a claim about a past intention; only the live file says
+	// whether the hooks are actually on.
+	if *status {
+		fmt.Print(install.RenderStatus(settings.Registered(), *path))
+		return nil
+	}
+
+	bin, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	if resolved, err := filepath.EvalSymlinks(bin); err == nil {
+		bin = resolved // hooks run from an arbitrary cwd and outlive a symlink
+	}
+
+	var changes []install.Change
+	if *uninstall {
+		changes = settings.Remove()
+	} else {
+		changes = settings.Apply(bin)
+	}
+	fmt.Print(install.Render(changes, bin))
+
+	if *dryRun {
+		fmt.Printf("\ndry run: %s not written\n", *path)
+		return nil
+	}
+	backup, err := settings.Save(*path)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("\nwrote %s", *path)
+	if backup != "" {
+		fmt.Printf(" (backup: %s)", backup)
+	}
+	fmt.Println("\nHooks load at startup — open a new session for this to take effect.")
+	return nil
+}
+
 // runDisplay is the MessageDisplay hook: it renders the vetted demote rung in
 // place of a flagged tic in the text streaming to the terminal. Display-only —
 // the transcript and the model's context keep the original word, so this
@@ -619,6 +689,7 @@ func runDisplay(args []string) error {
 		all    = fs.Bool("all", false, "swap every judged entry, not just curated known-tics")
 		extra  = fs.String("words", "", "explicit word:replacement pairs, comma-separated")
 		maxAge = fs.Duration("max-age", 7*24*time.Hour, "ignore reports older than this")
+		noLog  = fs.Bool("no-log", false, "don't record swaps to the swap ledger")
 	)
 	if fs.Parse(args) != nil {
 		return nil
@@ -654,8 +725,14 @@ func runDisplay(args []string) error {
 	}
 
 	st := loadDisplayState(in.MessageID)
-	out, st := swaps.Apply(in.Delta, st)
+	out, st, counts := swaps.Apply(in.Delta, st)
 	saveDisplayState(st)
+	// The transcript keeps the original word, so this log is the only record
+	// that the swap happened — and the only count that tracks what was read
+	// rather than what was written.
+	if !*noLog {
+		display.AppendLog(displayLogPath(), counts, swaps, time.Now())
+	}
 
 	var resp struct {
 		HookSpecificOutput struct {
@@ -674,12 +751,17 @@ func runDisplay(args []string) error {
 // message id doesn't match the stored one starts fresh outside any fence.
 const displayStateName = "display-state.json"
 
-func displayStatePath() string {
+func displayStatePath() string { return stateFile(displayStateName) }
+
+// displayLogPath is the swap ledger, beside the report and the tic ledger.
+func displayLogPath() string { return stateFile(display.LogName) }
+
+func stateFile(name string) string {
 	dir, err := report.StateDir()
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(dir, displayStateName)
+	return filepath.Join(dir, name)
 }
 
 func loadDisplayState(messageID string) display.State {
@@ -714,8 +796,20 @@ func saveDisplayState(st display.State) {
 func runLedger(args []string) error {
 	fs := flag.NewFlagSet("ledger", flag.ContinueOnError)
 	path := fs.String("ledger", "", "ledger file (default: state dir)")
+	showSwaps := fs.Bool("swaps", false, "instead show what the display hook replaced on screen")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *showSwaps {
+		// Deliberately a separate view, not another section: this counts what
+		// was read, the tic ledger counts what was written, and merging them
+		// would invite reading one number as the other.
+		swaps, err := display.LoadLog(displayLogPath())
+		if err != nil {
+			return err
+		}
+		fmt.Print(display.RenderLog(swaps, time.Now()))
+		return nil
 	}
 	p := *path
 	if p == "" {

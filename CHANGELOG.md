@@ -21,6 +21,21 @@ as the message streams. You read `supporting`; the model wrote `load-bearing`.
   the last tracked across streamed batches since a fence opens in one and
   closes in another. Runs in ~4 ms, which matters because Claude Code holds
   each batch of lines until the hook returns.
+- **`ledger -swaps`**: every replacement is appended to `swaps.jsonl`, because
+  the transcript keeps the original and otherwise nothing would record that the
+  swap happened. It counts what you were spared, which is deliberately not what
+  `trend` and `ledger` count — those read the transcripts and report what was
+  written, and the gap between the two numbers is the feature working.
+  Append-only JSONL so concurrent sessions can't interleave mid-line, and one
+  torn line costs a record rather than the history. `-no-log` opts out.
+- **`basanite install`** registers all three hooks from the running binary,
+  which is the one thing that knows its own absolute path — the README could
+  only ever write it as `/home/you/go/bin/basanite` and ask you to paste it
+  into nested JSON three times. Backs the settings file up, preserves every
+  key and foreign hook it doesn't own, and repoints an existing registration
+  instead of stacking a second one, so re-running after `go install` to a new
+  location is the fix rather than the problem. `-dry-run`, `-status`,
+  `-uninstall`.
 
 ## Unreleased — the budget was eating the chronic lane
 

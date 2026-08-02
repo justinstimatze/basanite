@@ -41,30 +41,37 @@ basanite version
 make install                                      # version comes from git describe
 scripts/fetch-data.sh ~/.local/share/basanite     # data assets (see Data below)
 basanite report                                   # build the first state file
+basanite install                                  # register the hooks
 ```
+
+`basanite install` writes all three hook registrations into
+`~/.claude/settings.json` using its own resolved absolute path — hooks run in
+whatever environment Claude Code was launched from, which may not have your Go
+bin directory on `PATH`, so the path has to be absolute and only the binary
+knows it. It backs the file up first, preserves everything it does not own,
+and repoints an existing basanite registration rather than adding a second
+one, so re-running it after `go install` to a new location is the fix rather
+than the problem. `-dry-run` prints the changes and writes nothing;
+`-status` shows what is registered right now; `-uninstall` removes them.
+
+Hooks load at startup, so open a new session afterwards.
 
 Pass the fetch script a real path (as above) rather than letting it default
 to `./data` — the default only works when you run basanite from the
 checkout, since `./data` is resolved against the current directory.
 
-Then register the hook in `~/.claude/settings.json`, using the absolute
-binary path — hooks run in whatever environment Claude Code was launched
-from, which may not have your Go bin directory on PATH:
+The three hooks `install` registers, and what each is for:
 
-```json
-{"hooks": {"UserPromptSubmit": [{"hooks": [{"type": "command", "command": "/home/you/go/bin/basanite hook"}]}]}}
-```
+| event | command | why |
+| --- | --- | --- |
+| `SessionStart` | `basanite refresh` | regenerate the report when it goes stale. Exits instantly when it's fresh, regenerates in the background when not (`async`, so it never delays the session), single-flights via a lock file, and logs each attempt to `refresh.log` in the state dir. |
+| `UserPromptSubmit` | `basanite hook` | inject tic awareness at turn start, ~4 ms. |
+| `MessageDisplay` | `basanite display` | render the demote rung instead of the tic, ~4 ms. See [below](#not-having-to-read-it-display) — this one is optional and changes only what you read. |
 
-The report goes stale after 7 days (the hook then silently stops injecting
-rather than nagging from old data). Either re-run `basanite report`
-manually now and then, or add the self-refresher to `SessionStart` — it
-exits instantly when the report is fresh, regenerates in the background
-when not (`async` keeps it from delaying the session), single-flights via
-a lock file, and logs each attempt to `refresh.log` in the state dir:
-
-```json
-{"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "/home/you/go/bin/basanite refresh", "async": true}]}]}}
-```
+The report goes stale after 7 days, and the hook then injects a one-line
+breadcrumb instead of silently serving nothing. With the `SessionStart`
+refresher registered this maintains itself; without it, re-run
+`basanite report` now and then.
 
 ## How it works
 
@@ -297,6 +304,24 @@ the weaker word.
 Claude Code holds each batch of lines until the hook returns, so it runs in
 ~4 ms and treats every abnormal case as silent success; on any error the
 original text is displayed.
+
+Every swap is recorded to `swaps.jsonl` in the state dir, since the transcript
+keeps the original and nothing else would know it happened:
+
+```
+$ basanite ledger -swaps
+basanite swap ledger — tics replaced on screen by the display hook.
+The model still wrote them: this counts what you were spared, not what changed.
+
+  load-bearing → supporting            142×   last 2026-08-14
+  substrate → component                 88×   last 2026-08-14
+
+  230 replacements over 12 days (19.2/day)
+```
+
+That count deliberately does not match `trend` or `ledger`, which read the
+transcripts and report what was *written*. The gap between the two is the
+display hook doing its job. Use `-no-log` to turn the recording off.
 
 ### Knowing whether it works
 

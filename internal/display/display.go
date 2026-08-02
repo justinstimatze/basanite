@@ -87,13 +87,17 @@ var (
 	protected = regexp.MustCompile("`[^`\n]*`" + `|\bhttps?://\S+|(?:[\w.-]*/){1,}[\w.-]+`)
 )
 
-// Apply swaps flagged words in one streamed batch, leaving code untouched, and
-// returns the text to display along with the fence state for the next batch.
+// Apply swaps flagged words in one streamed batch, leaving code untouched. It
+// returns the text to display, the fence state for the next batch, and a count
+// per lemma of what it replaced — the only record that the substitution
+// happened at all, since the transcript keeps the original.
+//
 // Batches end on line boundaries (except a message's last), so tracking fences
 // per line is sound.
-func (s Swaps) Apply(delta string, st State) (string, State) {
+func (s Swaps) Apply(delta string, st State) (string, State, map[string]int) {
+	counts := map[string]int{}
 	if len(s) == 0 || delta == "" {
-		return delta, st
+		return delta, st, counts
 	}
 	lines := strings.Split(delta, "\n")
 	for i, line := range lines {
@@ -104,22 +108,22 @@ func (s Swaps) Apply(delta string, st State) (string, State) {
 		if st.InFence {
 			continue
 		}
-		lines[i] = s.applyLine(line)
+		lines[i] = s.applyLine(line, counts)
 	}
-	return strings.Join(lines, "\n"), st
+	return strings.Join(lines, "\n"), st, counts
 }
 
 // applyLine swaps outside the protected spans of a single prose line.
-func (s Swaps) applyLine(line string) string {
+func (s Swaps) applyLine(line string, counts map[string]int) string {
 	spans := protected.FindAllStringIndex(line, -1)
 	var b strings.Builder
 	last := 0
 	for _, sp := range spans {
-		b.WriteString(s.swapWords(line[last:sp[0]]))
+		b.WriteString(s.swapWords(line[last:sp[0]], counts))
 		b.WriteString(line[sp[0]:sp[1]]) // verbatim
 		last = sp[1]
 	}
-	b.WriteString(s.swapWords(line[last:]))
+	b.WriteString(s.swapWords(line[last:], counts))
 	return b.String()
 }
 
@@ -127,15 +131,17 @@ func (s Swaps) applyLine(line string) string {
 // the tics that most want swapping are compounds like "load-bearing".
 var wordish = regexp.MustCompile(`[\p{L}][\p{L}'-]*`)
 
-func (s Swaps) swapWords(text string) string {
+func (s Swaps) swapWords(text string, counts map[string]int) string {
 	if text == "" {
 		return text
 	}
 	return wordish.ReplaceAllStringFunc(text, func(w string) string {
-		rep, ok := s[strings.ToLower(w)]
+		lemma := strings.ToLower(w)
+		rep, ok := s[lemma]
 		if !ok {
 			return w
 		}
+		counts[lemma]++
 		return matchCase(w, rep)
 	})
 }
