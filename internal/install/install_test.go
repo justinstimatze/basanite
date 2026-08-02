@@ -89,10 +89,22 @@ func TestApplyRetargetsInsteadOfDuplicating(t *testing.T) {
 	}
 
 	// Idempotent: a second identical run changes nothing.
-	for _, c := range s.Apply("/new/bin/basanite") {
+	second := s.Apply("/new/bin/basanite")
+	for _, c := range second {
 		if c.Action != "unchanged" {
 			t.Errorf("re-running a settled install reported %q for %s", c.Action, c.Hook.Event)
 		}
+	}
+	// ...and must not write, or the backup becomes a copy of the already
+	// modified file and the original is gone.
+	if !Settled(second) {
+		t.Error("a fully-unchanged run must report settled so the caller skips the write")
+	}
+	if Settled(changes) {
+		t.Error("the first run changed things and must not report settled")
+	}
+	if Settled(nil) {
+		t.Error("no changes at all is not a settled install")
 	}
 }
 

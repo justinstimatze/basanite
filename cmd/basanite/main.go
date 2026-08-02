@@ -608,8 +608,8 @@ func runRefresh(args []string) error {
 
 // runInstall registers the three hooks in the user's Claude Code settings.
 // The binary knows its own absolute path, which is the part the README could
-// only ever write as "/home/you/go/bin/basanite" and the user had to paste
-// into nested JSON three times.
+// only ever write as "/home/you/go/bin/basanite", pasted into nested JSON
+// three times.
 func runInstall(args []string) error {
 	fs := flag.NewFlagSet("install", flag.ContinueOnError)
 	var (
@@ -660,6 +660,10 @@ func runInstall(args []string) error {
 		fmt.Printf("\ndry run: %s not written\n", *path)
 		return nil
 	}
+	if install.Settled(changes) {
+		fmt.Printf("\nalready registered: %s unchanged\n", *path)
+		return nil
+	}
 	backup, err := settings.Save(*path)
 	if err != nil {
 		return err
@@ -696,6 +700,7 @@ func runDisplay(args []string) error {
 	}
 
 	var in struct {
+		SessionID string `json:"session_id"`
 		MessageID string `json:"message_id"`
 		Delta     string `json:"delta"`
 	}
@@ -724,9 +729,9 @@ func runDisplay(args []string) error {
 		return nil
 	}
 
-	st := loadDisplayState(in.MessageID)
+	st := loadDisplayState(in.SessionID, in.MessageID)
 	out, st, counts := swaps.Apply(in.Delta, st)
-	saveDisplayState(st)
+	saveDisplayState(in.SessionID, st)
 	// The transcript keeps the original word, so this log is the only record
 	// that the swap happened — and the only count that tracks what was read
 	// rather than what was written.
@@ -746,12 +751,22 @@ func runDisplay(args []string) error {
 	return nil
 }
 
-// displayStateName holds the fence state between the batches of one message.
-// A single file is enough: messages stream one at a time, so a batch whose
-// message id doesn't match the stored one starts fresh outside any fence.
-const displayStateName = "display-state.json"
+// displayStatePrefix names the per-session fence state carried between the
+// batches of one message.
+//
+// Per session, not one shared file: concurrent sessions interleave batches, so
+// a single file lets one session's message id evict another's state. The
+// evicted session then resumes mid-code-block believing it is in prose and
+// swaps inside the fence — the one outcome the fence tracking exists to
+// prevent. Same shape as the injected- markers, and pruned the same way.
+const displayStatePrefix = "display-"
 
-func displayStatePath() string { return stateFile(displayStateName) }
+func displayStatePath(sessionID string) string {
+	if !validSessionID(sessionID) {
+		return "" // no id: run stateless rather than share a file with everyone
+	}
+	return stateFile(displayStatePrefix + sessionID + ".json")
+}
 
 // displayLogPath is the swap ledger, beside the report and the tic ledger.
 func displayLogPath() string { return stateFile(display.LogName) }
@@ -764,9 +779,9 @@ func stateFile(name string) string {
 	return filepath.Join(dir, name)
 }
 
-func loadDisplayState(messageID string) display.State {
+func loadDisplayState(sessionID, messageID string) display.State {
 	fresh := display.State{MessageID: messageID}
-	p := displayStatePath()
+	p := displayStatePath(sessionID)
 	if p == "" || messageID == "" {
 		return fresh
 	}
@@ -781,11 +796,13 @@ func loadDisplayState(messageID string) display.State {
 	return st
 }
 
-func saveDisplayState(st display.State) {
-	if p := displayStatePath(); p != "" {
-		if b, err := json.Marshal(st); err == nil {
-			os.WriteFile(p, b, 0o600)
-		}
+func saveDisplayState(sessionID string, st display.State) {
+	p := displayStatePath(sessionID)
+	if p == "" {
+		return
+	}
+	if b, err := json.Marshal(st); err == nil {
+		os.WriteFile(p, b, 0o600)
 	}
 }
 
@@ -1062,7 +1079,7 @@ func pruneMarkers(dir string) {
 	}
 	cutoff := time.Now().AddDate(0, 0, -30)
 	for _, e := range entries {
-		if !strings.HasPrefix(e.Name(), "injected-") {
+		if !strings.HasPrefix(e.Name(), "injected-") && !strings.HasPrefix(e.Name(), displayStatePrefix) {
 			continue
 		}
 		if info, err := e.Info(); err == nil && info.ModTime().Before(cutoff) {

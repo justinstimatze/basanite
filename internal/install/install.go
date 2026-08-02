@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 )
 
@@ -247,6 +246,19 @@ func (s *Settings) Save(path string) (backup string, err error) {
 	return backup, os.Rename(tmp.Name(), path)
 }
 
+// Settled reports whether every hook is already where it should be, so a
+// re-run can skip the write. Rewriting on a no-op would replace the backup
+// with the already-modified file, quietly losing the only copy of what the
+// settings looked like before basanite first touched them.
+func Settled(changes []Change) bool {
+	for _, c := range changes {
+		if c.Action != "unchanged" {
+			return false
+		}
+	}
+	return len(changes) > 0
+}
+
 // DefaultPath is the user-level Claude Code settings file.
 func DefaultPath() (string, error) {
 	home, err := os.UserHomeDir()
@@ -273,11 +285,6 @@ func Render(changes []Change, bin string) string {
 func RenderStatus(reg map[string]string, path string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "hooks in %s\n\n", path)
-	events := make([]string, 0, len(Hooks))
-	for _, h := range Hooks {
-		events = append(events, h.Event)
-	}
-	sort.SliceStable(events, func(i, j int) bool { return false }) // keep run order
 	for _, h := range Hooks {
 		mark, detail := "not registered", ""
 		if cmd, ok := reg[h.Event]; ok {
