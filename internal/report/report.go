@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -143,6 +144,21 @@ func Load(path string) (*Report, error) {
 // truncation enforces the judge prompt's own "one short clause" contract,
 // which the judge ignores: sentences two onward restate the ladder the line
 // already shows.
+//
+// The word budget is split between the two lanes rather than filled in report
+// order, because report order is risers first and a first-come cap therefore
+// spends every slot on them. That is how "load-bearing" — detected, curated,
+// sitting at position 13 of 24 as a known chronic entry — went months without
+// ever being injected while its rate ran near sixty a day. The chronic lane was
+// working the whole time and the budget was eating it.
+//
+// Within the chronic share, curated known-tics go first. A riser is an
+// observation that a habit may be forming and it ages out on its own; a known
+// tic is the writer having said in advance that they never want to see the
+// word. A standing instruction should not lose its slot to a passing one.
+//
+// Either lane's unused share spills to the other, so a quiet week for one still
+// fills the budget rather than shrinking the injection.
 func (r *Report) RenderHook(maxWords, maxPhrases int) string {
 	if maxWords <= 0 {
 		maxWords = len(r.Entries) // 0 = uncapped, the pre-cap behavior
@@ -150,24 +166,50 @@ func (r *Report) RenderHook(maxWords, maxPhrases int) string {
 	if maxPhrases <= 0 {
 		maxPhrases = len(r.Entries)
 	}
-	sub := &Report{GeneratedAt: r.GeneratedAt}
-	words, phrases := 0, 0
+
+	var risers, chronic, phrases []Entry
 	for _, e := range r.Entries {
-		if e.Kind == "phrase" {
-			if phrases >= maxPhrases {
-				continue
-			}
-			phrases++
-		} else {
-			if words >= maxWords {
-				continue
-			}
-			words++
+		switch {
+		case e.Kind == "phrase":
+			phrases = append(phrases, e)
+		case e.Kind == "chronic":
+			chronic = append(chronic, e)
+		default:
+			risers = append(risers, e)
 		}
+	}
+	// Stable, so entries keep the pipeline's ordering within each group and
+	// only the curated ones move.
+	sort.SliceStable(chronic, func(i, j int) bool { return chronic[i].Known && !chronic[j].Known })
+
+	// Half the word budget to each lane, chronic rounding up: at the shipped
+	// cap of five that is three chronic and two risers, and the lane that has
+	// gone unheard is the one that should win the odd slot.
+	chronicShare := (maxWords + 1) / 2
+	picked := take(chronic, chronicShare)
+	picked = append(picked, take(risers, maxWords-len(picked))...)
+	// Spill: whichever lane came up short leaves room for the other.
+	if short := maxWords - len(picked); short > 0 {
+		picked = append(picked, take(chronic[min(len(chronic), chronicShare):], short)...)
+	}
+	picked = append(picked, take(phrases, maxPhrases)...)
+
+	sub := &Report{GeneratedAt: r.GeneratedAt}
+	for _, e := range picked {
 		e.JudgeNote = firstSentence(e.JudgeNote)
 		sub.Entries = append(sub.Entries, e)
 	}
 	return sub.Render(false)
+}
+
+func take(es []Entry, n int) []Entry {
+	if n <= 0 {
+		return nil
+	}
+	if n > len(es) {
+		n = len(es)
+	}
+	return es[:n]
 }
 
 // noteSentenceEnd marks a sentence boundary inside a judge note: terminal

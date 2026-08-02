@@ -1,5 +1,33 @@
 # Changelog
 
+## Unreleased — the budget was eating the chronic lane
+
+The v0.5.0 cap fixed a wall of eighteen entries and introduced a quieter
+problem: `RenderHook` filled the word budget in report order, and report order
+is risers first. Five slots, five risers, every time.
+
+So the chronic lane — the one built for words that never rise because they have
+been at the same rate since the model shipped — was detected, scored, curated
+and then discarded at the last step. `load-bearing` is the first entry in the
+shipped known-tics seed and is in the live list. It sat at position 13 of 24 in
+the report as `kind=chronic, known=true`, at 0.55 per 1k, roughly sixty
+occurrences a day across 23.4M characters of assistant prose. It had never once
+been injected. The detector was right the whole time and nothing downstream let
+it speak.
+
+- **The word budget is split between the lanes**, half each with chronic
+  rounding up: at the shipped cap of five that is three chronic and two risers.
+  The lane that has gone unheard wins the odd slot.
+- **Curated known-tics go first within the chronic share.** A riser is an
+  observation that a habit may be forming, and it ages out on its own. A known
+  tic is the writer having said in advance that they never want to see the word.
+  A standing instruction should not lose its slot to a passing one.
+- **Either lane's unused share spills to the other**, so a quiet week for one
+  still fills the budget rather than shrinking the injection.
+
+Three regression tests, including the one that names the original failure: a
+curated known tic behind eight risers must still reach the injection.
+
 ## v0.5.0 (2026-07-28) — the injection earns a budget
 
 The July 2026 report carried 18 entries and 4,613 chars of judge notes into

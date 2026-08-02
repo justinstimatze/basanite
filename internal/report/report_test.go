@@ -1,6 +1,7 @@
 package report
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -242,5 +243,65 @@ func TestFirstSentence(t *testing.T) {
 		if got := firstSentence(c.in); got != c.want {
 			t.Errorf("firstSentence(%q):\n got %q\nwant %q", c.in, got, c.want)
 		}
+	}
+}
+
+// word builds a renderable word entry: Render needs a ladder before it will
+// print one at all, which is why a fixture without rungs silently vanishes.
+func word(kind, lemma string, known bool) Entry {
+	return Entry{
+		Kind: kind, Lemma: lemma, Known: known, RecentCount: 40, Ratio: 2.2,
+		Ladder: []Rung{{Word: "plain", IC: 1}, {Word: lemma, IC: 2}},
+	}
+}
+
+// The bug this exists to prevent: report order is risers first, so a
+// first-come word cap spends every slot on them and the chronic lane is never
+// heard. "load-bearing" sat at position 13 of 24 as a curated known tic,
+// running near sixty a day, and was injected exactly never.
+func TestHookBudgetDoesNotStarveTheChronicLane(t *testing.T) {
+	r := &Report{}
+	for i := 0; i < 8; i++ {
+		r.Entries = append(r.Entries, word("riser", fmt.Sprintf("riser%d", i), false))
+	}
+	for i := 0; i < 6; i++ {
+		r.Entries = append(r.Entries, word("chronic", fmt.Sprintf("chronic%d", i), false))
+	}
+	r.Entries = append(r.Entries, word("chronic", "load-bearing", true))
+
+	out := r.RenderHook(5, 2)
+	if !strings.Contains(out, "load-bearing") {
+		t.Errorf("the curated known tic never reached the injection:\n%s", out)
+	}
+	if !strings.Contains(out, "riser0") {
+		t.Errorf("risers lost their share entirely:\n%s", out)
+	}
+}
+
+// A week with nothing chronic must still fill the word budget rather than
+// shrinking the injection to the riser half.
+func TestOneEmptyLaneSpillsToTheOther(t *testing.T) {
+	r := &Report{}
+	for i := 0; i < 8; i++ {
+		r.Entries = append(r.Entries, word("riser", fmt.Sprintf("riser%d", i), false))
+	}
+	out := r.RenderHook(5, 2)
+	for i := 0; i < 5; i++ {
+		if !strings.Contains(out, fmt.Sprintf("riser%d", i)) {
+			t.Errorf("riser%d missing — the chronic share was not spilled back:\n%s", i, out)
+		}
+	}
+}
+
+// Curated entries are the writer's standing instruction and outrank the
+// automatically-detected chronic entries competing for the same share.
+func TestKnownTicsWinTheChronicShare(t *testing.T) {
+	r := &Report{}
+	for i := 0; i < 5; i++ {
+		r.Entries = append(r.Entries, word("chronic", fmt.Sprintf("auto%d", i), false))
+	}
+	r.Entries = append(r.Entries, word("chronic", "curated", true))
+	if out := r.RenderHook(5, 2); !strings.Contains(out, "curated") {
+		t.Errorf("a curated tic lost its slot to automatic ones:\n%s", out)
 	}
 }
