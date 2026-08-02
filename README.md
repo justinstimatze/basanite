@@ -26,6 +26,7 @@ basanite report          # full pipeline (scan→vet→ladder) → state file, ~
                          #   judges out terms of art by default; --judge=false for deterministic-only
 basanite refresh         # regenerate the state file if stale (SessionStart entry)
 basanite hook            # UserPromptSubmit entry: inject the report, ~4 ms
+basanite display         # MessageDisplay entry: show the demote rung instead of the tic
 basanite ledger          # flagged tics over time — is a tic's rate falling?
 basanite version
 ```
@@ -254,6 +255,48 @@ known-tics go first — a riser is an observation that a habit *may* be
 forming and it ages out on its own, while a known tic is you having said in
 advance that you never want to see the word. Either lane's unused share
 spills to the other.
+
+### Not having to read it (`display`)
+
+The hook above tries to change what gets written, which takes a turn to land
+and does not always land. `basanite display` is the other half: a
+`MessageDisplay` hook that swaps a flagged word for its vetted demote rung in
+the text streaming to your terminal. You read `supporting`; the model wrote
+`load-bearing`.
+
+```json
+{"hooks": {"MessageDisplay": [{"hooks": [{"type": "command", "command": "/home/you/go/bin/basanite display"}]}]}}
+```
+
+It is **display-only, by design of the event**: the transcript and the model's
+own context keep the original word. Two consequences worth being clear about.
+The model never sees the swap, so this changes nothing about what it writes —
+it is relief, not intervention. And because `report`, `trend` and `ledger` all
+read the transcripts, the measurement stays honest no matter what the screen
+shows: the rate you're told is the rate that was written.
+
+The replacement is the rung the judge picked, read live from `report.json`, so
+the table maintains itself as your tics change. By default only **curated
+known-tics** are swapped. A ladder is vetted for how well a word substitutes
+*across your uses on average*, which is the right test for offering awareness
+and the wrong one for rewriting every occurrence — the live report demotes
+`turn` to `change` and `five` to `figure`, which as a display rule gives you
+"it is your change to indicate figure things". Words on the curated list are
+the ones you already declared unwanted, and they tend to be unwanted precisely
+because they're loose figurative intensifiers, where any occurrence can take
+the weaker word.
+
+- `-all` opts into every judged entry, garbage included.
+- `-words load-bearing:critical,seam:joint` overrides or adds pairs — the
+  escape hatch for a lean basanite can't see, since it only reads assistant
+  prose and not, say, your own hook templates.
+- Code is left alone: inline backticks, paths, URLs, and fenced blocks
+  (tracked across streamed batches) are never rewritten, so what you copy is
+  what was written. Stock phrases are never swapped — they carry no ladder.
+
+Claude Code holds each batch of lines until the hook returns, so it runs in
+~4 ms and treats every abnormal case as silent success; on any error the
+original text is displayed.
 
 ### Knowing whether it works
 

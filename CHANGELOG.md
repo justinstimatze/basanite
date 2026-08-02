@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased — not having to read it
+
+The injection tries to change what gets written, which takes a turn to land and
+does not always land. `basanite display` is the other half of the want: a
+`MessageDisplay` hook that renders the vetted demote rung in place of the tic
+as the message streams. You read `supporting`; the model wrote `load-bearing`.
+
+- **Display-only, by design of the event.** The transcript and the model's
+  context keep the original, so this changes nothing about the writing — and
+  `report`, `trend` and `ledger` all read the transcripts, so the measurement
+  stays honest whatever the screen shows. Relief, not intervention.
+- **The rung comes from `report.json`**, so the swap table maintains itself.
+  Default is curated known-tics only: a ladder is vetted for average
+  substitutability, not per-occurrence correctness, and the live report demotes
+  `turn` to `change` and `five` to `figure` — fine as awareness, ruinous as a
+  display rule ("it is your change to indicate figure things"). `-all` opts
+  into the rest; `-words a:b` overrides.
+- **Code is never rewritten**: inline backticks, paths, URLs and fenced blocks,
+  the last tracked across streamed batches since a fence opens in one and
+  closes in another. Runs in ~4 ms, which matters because Claude Code holds
+  each batch of lines until the hook returns.
+
 ## Unreleased — the budget was eating the chronic lane
 
 The v0.5.0 cap fixed a wall of eighteen entries and introduced a quieter

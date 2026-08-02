@@ -20,6 +20,7 @@ import (
 	"github.com/justinstimatze/basanite/internal/cloze"
 	"github.com/justinstimatze/basanite/internal/corpus"
 	"github.com/justinstimatze/basanite/internal/detect"
+	"github.com/justinstimatze/basanite/internal/display"
 	"github.com/justinstimatze/basanite/internal/embed"
 	"github.com/justinstimatze/basanite/internal/judge"
 	"github.com/justinstimatze/basanite/internal/knowntics"
@@ -44,6 +45,7 @@ usage: basanite <command> [flags]
   report          full pipeline (scan→vet→ladder) → state file
   refresh         regenerate the state file if stale (SessionStart entry)
   hook            UserPromptSubmit entry: inject the report
+  display         MessageDisplay entry: show the demote rung instead of the tic
   ledger          flagged tics over time — is a tic's rate falling?
   version         print version
 
@@ -74,6 +76,8 @@ func main() {
 		err = runRefresh(args)
 	case "hook":
 		err = runHook(args)
+	case "display":
+		err = runDisplay(args)
 	case "ledger":
 		err = runLedger(args)
 	case "version", "--version", "-v":
@@ -596,6 +600,111 @@ func runRefresh(args []string) error {
 	}
 	os.WriteFile(filepath.Join(stateDir, "refresh.log"), []byte(status), 0o600)
 	return nil
+}
+
+// runDisplay is the MessageDisplay hook: it renders the vetted demote rung in
+// place of a flagged tic in the text streaming to the terminal. Display-only —
+// the transcript and the model's context keep the original word, so this
+// changes nothing about the writing and nothing about what basanite measures.
+// It is the "I don't want to read it" surface, not a second injection.
+//
+// Like runHook it never fails: Claude Code holds each batch of lines until this
+// returns and shows the original text on any error, so every abnormal case
+// exits silently rather than stalling or garbling the terminal.
+func runDisplay(args []string) error {
+	fs := flag.NewFlagSet("display", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	var (
+		path   = fs.String("report", "", "report path (default: state dir)")
+		all    = fs.Bool("all", false, "swap every judged entry, not just curated known-tics")
+		extra  = fs.String("words", "", "explicit word:replacement pairs, comma-separated")
+		maxAge = fs.Duration("max-age", 7*24*time.Hour, "ignore reports older than this")
+	)
+	if fs.Parse(args) != nil {
+		return nil
+	}
+
+	var in struct {
+		MessageID string `json:"message_id"`
+		Delta     string `json:"delta"`
+	}
+	if json.NewDecoder(os.Stdin).Decode(&in) != nil || in.Delta == "" {
+		return nil // nothing to render: leave the original alone
+	}
+
+	if *path == "" {
+		p, err := report.Path()
+		if err != nil {
+			return nil
+		}
+		*path = p
+	}
+	swaps := display.Swaps{}
+	// A stale report is still a fine swap table — the words on it were tics
+	// last week and the rungs are still vetted. max-age only refuses one old
+	// enough to predate the curation entirely.
+	if rep, err := report.Load(*path); err == nil && rep != nil && time.Since(rep.GeneratedAt) <= *maxAge {
+		swaps = display.FromReport(rep, *all)
+	}
+	if *extra != "" {
+		swaps.Add(strings.Split(*extra, ","))
+	}
+	if len(swaps) == 0 {
+		return nil
+	}
+
+	st := loadDisplayState(in.MessageID)
+	out, st := swaps.Apply(in.Delta, st)
+	saveDisplayState(st)
+
+	var resp struct {
+		HookSpecificOutput struct {
+			HookEventName  string `json:"hookEventName"`
+			DisplayContent string `json:"displayContent"`
+		} `json:"hookSpecificOutput"`
+	}
+	resp.HookSpecificOutput.HookEventName = "MessageDisplay"
+	resp.HookSpecificOutput.DisplayContent = out
+	json.NewEncoder(os.Stdout).Encode(&resp)
+	return nil
+}
+
+// displayStateName holds the fence state between the batches of one message.
+// A single file is enough: messages stream one at a time, so a batch whose
+// message id doesn't match the stored one starts fresh outside any fence.
+const displayStateName = "display-state.json"
+
+func displayStatePath() string {
+	dir, err := report.StateDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(dir, displayStateName)
+}
+
+func loadDisplayState(messageID string) display.State {
+	fresh := display.State{MessageID: messageID}
+	p := displayStatePath()
+	if p == "" || messageID == "" {
+		return fresh
+	}
+	b, err := os.ReadFile(p)
+	if err != nil {
+		return fresh
+	}
+	var st display.State
+	if json.Unmarshal(b, &st) != nil || st.MessageID != messageID {
+		return fresh // a new message always starts outside a fence
+	}
+	return st
+}
+
+func saveDisplayState(st display.State) {
+	if p := displayStatePath(); p != "" {
+		if b, err := json.Marshal(st); err == nil {
+			os.WriteFile(p, b, 0o600)
+		}
+	}
 }
 
 // runLedger prints the persisted before/after record of every flagged tic:
