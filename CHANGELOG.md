@@ -1,6 +1,15 @@
 # Changelog
 
-## Unreleased — not having to read it
+## v0.6.0 (2026-08-02) — not having to read it
+
+Two ways a detected tic still reached the page. One was a budget that spent
+every slot on the wrong lane, so the curated chronic entries were never
+injected at all. The other is that even a landed injection only changes the
+*next* turn, and sometimes not that — nothing was doing anything about the
+word already on screen. This release closes both, plus an `install` that
+registers the hooks itself.
+
+### Not having to read it
 
 The injection tries to change what gets written, which takes a turn to land and
 does not always land. `basanite display` is the other half of the want: a
@@ -36,8 +45,19 @@ as the message streams. You read `supporting`; the model wrote `load-bearing`.
   instead of stacking a second one, so re-running after `go install` to a new
   location is the fix rather than the problem. `-dry-run`, `-status`,
   `-uninstall`.
+- **Fence state is per session.** Found in review, and live for about an hour:
+  concurrent sessions interleave batches through one binary, and a single
+  state file keyed on message id let one session evict another's. The evicted
+  session resumed mid-code-block believing it was in prose and swapped inside
+  the fence — the one outcome the tracking exists to prevent. Reproduced (`var
+  substrate` came back as `var component`), then keyed by session id and
+  pruned by the sweep that already handles the injection markers. A batch with
+  no valid session id runs stateless rather than sharing a file with everyone.
+  Relatedly, `install` no longer writes when nothing changed: it backed up on
+  every run, so a second run overwrote the backup with the already-modified
+  file and the pre-basanite original was gone.
 
-## Unreleased — the budget was eating the chronic lane
+### The budget was eating the chronic lane
 
 The v0.5.0 cap fixed a wall of eighteen entries and introduced a quieter
 problem: `RenderHook` filled the word budget in report order, and report order
