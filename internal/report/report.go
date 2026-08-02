@@ -169,6 +169,13 @@ func (r *Report) RenderHook(maxWords, maxPhrases int) string {
 
 	var risers, chronic, phrases []Entry
 	for _, e := range r.Entries {
+		// Budget only what Render will actually print. An entry whose ladder
+		// leaves nothing below the lemma is dropped at render time, and a slot
+		// spent on it would silently shrink the injection with no backfill —
+		// the same shape as the lane bug above, one layer down.
+		if !e.renderable() {
+			continue
+		}
 		switch {
 		case e.Kind == "phrase":
 			phrases = append(phrases, e)
@@ -255,10 +262,10 @@ func (r *Report) Render(showSpark bool) string {
 			rendered++
 			continue
 		}
-		trimmed := trimLadder(e.Ladder, e.Lemma)
-		if len(trimmed) < 2 {
+		if !e.renderable() {
 			continue // nothing below the target: no demotion to offer
 		}
+		trimmed := trimLadder(e.Ladder, e.Lemma)
 		words := make([]string, 0, len(trimmed))
 		for _, rung := range trimmed {
 			w := rung.Word
@@ -333,6 +340,15 @@ func (e Entry) note() string {
 // just below the target, then the target. A 20-rung WordNet dump is noise,
 // and the stronger-than-target direction is where wrong-sense survivors
 // tend to sit — the useful move is down the ladder, not up.
+// renderable reports whether Render will print this entry — the single test
+// both Render and RenderHook's budget go through, so a slot is never spent on
+// an entry the reader never sees. A phrase carries no ladder and always
+// prints; a word entry needs at least one rung below the lemma, since the
+// injection offers a demotion or nothing.
+func (e Entry) renderable() bool {
+	return e.Kind == "phrase" || len(trimLadder(e.Ladder, e.Lemma)) >= 2
+}
+
 func trimLadder(rungs []Rung, lemma string) []Rung {
 	self := len(rungs) - 1
 	for i, r := range rungs {

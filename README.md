@@ -26,6 +26,7 @@ basanite report          # full pipeline (scan→vet→ladder) → state file, ~
                          #   judges out terms of art by default; --judge=false for deterministic-only
 basanite refresh         # regenerate the state file if stale (SessionStart entry)
 basanite hook            # UserPromptSubmit entry: inject the report, ~4 ms
+basanite ledger          # flagged tics over time — is a tic's rate falling?
 basanite version
 ```
 
@@ -114,9 +115,10 @@ clustered contexts = tic-like; below = diverse = signature, leave it alone.
 ### Chronic tics (the frame and rarity routes)
 
 A chronic tic is invisible to `scan` — a word used at a steady ~1/1k for
-months is its own baseline. The report adds up to four chronic entries:
-steady high-rate words, used across several projects, admitted by one of
-two deterministic evidence routes:
+months is its own baseline. The report adds steady high-rate words used
+across several projects, each admitted by a deterministic evidence route.
+Two are described here; a third (the curated known-tics list) and a fourth
+(the marked route, for live metaphors) have their own sections below.
 
 - **frame**: the genitive metaphor frame `<det> <word> of` ("the spine of
   the design") repeats across ≥25% of uses. A word can be topically
@@ -131,6 +133,25 @@ two deterministic evidence routes:
 Context clustering is deliberately **not** an admission route: measured on
 real data, domain vocabulary legitimately clusters at the same delta as
 genuine tics, so it can't separate them.
+
+### Live metaphors (the marked route)
+
+`load-bearing` is the case the routes above can detect but not *rank*. The
+rarity route admits it as a candidate, then its modest rate keeps it out of
+the slots — and every other cheap statistic that might promote it
+(dispersion, rarity, concreteness) is shared by ordinary dev jargon. The
+separating signal is
+**context-incongruity**: the cosine distance between a word's literal sense
+(its GloVe vector) and the centroid of the contexts it actually appears in.
+A live metaphor is a physical word recurring in non-physical contexts
+(`load-bearing` scores ~1.0); literal jargon stays in its home
+neighborhood and sinks (`running` 0.34, `hook` 0.57, `slot` 0.60).
+
+The route gathers dispersed, rare-in-English candidates, ranks them by
+incongruity, gates at a floor of 0.85, and hands the survivors to the same
+judge — which is what separates a live metaphor from a term of art whose
+vector is merely noisy (`grep`, `config`). A marked entry renders and is
+counted as chronic. `-marked N` sets the cap; `-marked 0` disables it.
 
 ### The term-of-art judge (optional)
 
@@ -218,15 +239,53 @@ naming a word in order to suppress it tends to prime it instead
 The ladder reads weakest → strongest so the move can be *demote*, not just
 swap.
 
+The console `report` view shows every entry; the **injection is budgeted** to
+5 words and 2 phrases (`hook -top-words` / `-top-phrases`; 0 = uncapped),
+with judge notes cut to their first sentence. A model reading eighteen
+vocabulary directives mid-task skims them — a handful it can hold is worth
+more than a wall it doesn't.
+
+The word budget is **split between the lanes**, half each with chronic
+rounding up, rather than filled in report order. Report order is risers
+first, so a first-come cap spends every slot on them: `load-bearing` sat in
+the report as a curated chronic entry for months, at roughly sixty uses a
+day, and was injected exactly never. Within the chronic share the curated
+known-tics go first — a riser is an observation that a habit *may* be
+forming and it ages out on its own, while a known tic is you having said in
+advance that you never want to see the word. Either lane's unused share
+spills to the other.
+
 ### Knowing whether it works
 
-The transcripts are the longitudinal record; no state accumulates.
-`basanite trend <lemma>` shows weekly rates straight from them, so the
-intervention is measurable: after the hook goes live, a flagged word's rate
-should fall and its alternatives' rates rise. It also exposes the two tic
-shapes: *forming* (rate rising from zero — what `scan` catches) and
-*chronic* (rate high and flat, invisible to delta-over-baseline because the
-baseline is already saturated — `trend` is the view for those).
+The transcripts are the longitudinal record, so the intervention is
+measurable: after the hook goes live, a flagged word's rate should fall and
+its alternatives' rates rise.
+
+`basanite trend <lemma>` reads weekly rates straight from the transcripts.
+It also exposes the two tic shapes: *forming* (rate rising from zero — what
+`scan` catches) and *chronic* (rate high and flat, invisible to
+delta-over-baseline because the baseline is already saturated — `trend` is
+the view for those).
+
+`basanite ledger` is the same question without having to name a word or
+remember a number. Each refresh folds the report into `ledger.json` beside
+it, so every flagged lemma keeps its first-flagged date, its rate then and
+now, and — the part no single report can show — the date it dropped off the
+list entirely:
+
+```
+still flagged:
+  substrate        since 2026-07-14 (2w, 4 refreshes)  1.08 → 0.94/1k  ↓13%  chronic
+  load-bearing     since 2026-07-14 (2w, 4 refreshes)  0.61 → 0.55/1k  ↓11%  chronic
+  running          since 2026-07-14 (2w, 4 refreshes)  1.62 → 1.80/1k  ↑11%  chronic
+
+faded out (dropped from the report):
+  spine            2026-06-02 → gone 2026-07-14  0.71 → 0.12/1k  ↓83%  chronic
+```
+
+It accrues through the `refresh` hook with nothing to run by hand. Treat it
+as a record, not a proof: a falling rate is consistent with the loop
+working, but direct callouts and topic drift are unmeasured confounds.
 
 ## Data
 
@@ -264,8 +323,12 @@ Nothing is redistributed in this repository. The binary looks for assets in
   on the curated reference, won't be flagged.
 - Phrase detection is exact match against the curated list — it catches the
   known phrases, not novel ones, and a heavily reworded variant slips it.
-- Entries are capped (8 risers + 4 chronic + 4 known + 4 phrases per report)
-  so the injection stays digestible; a tic below those cuts waits its turn.
+- Two separate caps, and the tighter one is the injection's. The report
+  admits up to 8 risers, 4 chronic, 4 known, 6 marked and 4 phrases; the
+  turn-start injection then shows 5 words and 2 phrases of that. So a word
+  can be correctly detected, judged and written to the report and still not
+  reach you — a tic below either cut waits its turn. `basanite report` on
+  the console is the view with nothing withheld.
 
 ## License
 

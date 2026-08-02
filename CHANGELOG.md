@@ -28,6 +28,18 @@ it speak.
 Three regression tests, including the one that names the original failure: a
 curated known tic behind eight risers must still reach the injection.
 
+- **The budget now counts only what renders.** `Render` drops an entry whose
+  ladder leaves no rung below the lemma, so a slot spent on one shrank the
+  injection to four words with nothing backfilling it — the same shape as the
+  lane bug, one layer down. Both paths go through a single `renderable` test.
+  Latent rather than firing: it needs a lemma weaker than every candidate it
+  gathered, which the live report has never produced.
+
+Docs caught up with two releases of drift: the `ledger` command was missing
+from the README command list, the marked route had shipped undocumented, the
+injection budget was unmentioned, and "no state accumulates" had been false
+since the ledger landed.
+
 ## v0.5.0 (2026-07-28) — the injection earns a budget
 
 The July 2026 report carried 18 entries and 4,613 chars of judge notes into

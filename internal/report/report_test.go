@@ -293,6 +293,35 @@ func TestOneEmptyLaneSpillsToTheOther(t *testing.T) {
 	}
 }
 
+// The same shape as the lane bug, one layer down: a slot spent on an entry
+// Render then drops shrinks the injection with nothing backfilling it. The
+// ladder is sorted IC-ascending, so a lemma weaker than every candidate it
+// gathered lands at index 0 with no rung below it to demote to.
+func TestBudgetSkipsWhatRenderDrops(t *testing.T) {
+	dead := Entry{
+		Kind: "chronic", Lemma: "floor", RecentCount: 40, Ratio: 2.2,
+		Ladder: []Rung{{Word: "floor", IC: 1}, {Word: "stronger", IC: 9}},
+	}
+	r := &Report{Entries: []Entry{dead}}
+	if out := r.RenderHook(5, 2); strings.Contains(out, "floor") {
+		t.Fatalf("an entry with no rung below the lemma must not render:\n%s", out)
+	}
+	for i := 0; i < 3; i++ {
+		r.Entries = append(r.Entries, word("chronic", fmt.Sprintf("chronic%d", i), false))
+	}
+	for i := 0; i < 3; i++ {
+		r.Entries = append(r.Entries, word("riser", fmt.Sprintf("riser%d", i), false))
+	}
+	// Five renderable words: three chronic, two risers. chronic2 is the tell —
+	// it only makes the cut if the dead entry never took a slot.
+	out := r.RenderHook(5, 2)
+	for _, want := range []string{"chronic0", "chronic1", "chronic2", "riser0", "riser1"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("%s missing — the dead entry ate a budget slot:\n%s", want, out)
+		}
+	}
+}
+
 // Curated entries are the writer's standing instruction and outrank the
 // automatically-detected chronic entries competing for the same share.
 func TestKnownTicsWinTheChronicShare(t *testing.T) {
