@@ -28,6 +28,7 @@ basanite refresh         # regenerate the state file if stale (SessionStart entr
 basanite hook            # UserPromptSubmit entry: inject the report, ~4 ms
 basanite display         # MessageDisplay entry: show the demote rung instead of the tic
 basanite ledger          # flagged tics over time — is a tic's rate falling?
+basanite audit           # which curated known-tics entries have ever fired?
 basanite version
 ```
 
@@ -354,6 +355,43 @@ faded out (dropped from the report):
 It accrues through the `refresh` hook with nothing to run by hand. Treat it
 as a record, not a proof: a falling rate is consistent with the loop
 working, but direct callouts and topic drift are unmeasured confounds.
+
+### Auditing the curated list (`audit`)
+
+A curated list cannot answer the one question that decides whether it is worth
+curating: **which entries have ever fired?** From outside, an entry that never
+matches looks exactly like one that matches constantly — it costs a line, it
+costs a scan, and it reassures you the tic is covered while nothing is watching
+for it. The same blind spot hides the opposite case: when a word you know you
+overuse never appears in a report, "the ranking is working as designed" and
+"the pattern never matches" are indistinguishable.
+
+`basanite audit` counts every entry against the corpus and says which of the
+three it is:
+
+```
+  ENTRY                         HITS   RATE/1K  PROJ  STATUS
+  substrate                     3693     0.931    50  reported (#12)
+  calibration                   1154     0.291    43  below cutoff
+  "the real point is"              0     0.000     0  NEVER FIRES
+```
+
+Three things that buys. Dead entries become visible and can be cut, so the
+list stays honest. A `NEVER FIRES` row separates "not a problem for you" from
+"the pattern is broken". And the cutoff becomes legible — a term matching
+1,154 times across 43 projects while never reaching a report is a ranking
+decision you can now see and argue with, rather than a shrug.
+
+Phrases are counted over the surface word stream and words over the lemmatized
+one, since that is the stream each is written to be found in; auditing a
+stopword-heavy phrase against the tokenized stream would call it dead for the
+wrong reason. `-never` narrows the output to just the entries worth cutting,
+`-days` sets the window (default 90), and `-list` audits a file other than
+your own. It prints the list path it read, because an audit that reports on a
+list it never opened is the exact failure it exists to catch.
+
+It reads the whole window in one pass and takes a few minutes on a large
+corpus — it's an occasional command, not part of any loop.
 
 ## Data
 

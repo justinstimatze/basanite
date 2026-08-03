@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased — which entries have ever fired?
+
+A curated list cannot answer the question that decides whether it is worth
+curating. An entry that never matches looks, from the list's own point of
+view, exactly like one that matches constantly. And when a word you know you
+overuse never reaches a report, "the ranking is working as designed" and "the
+pattern is broken" are indistinguishable from outside — which is the shape of
+the `load-bearing` complaint that turned out to be a budget bug two releases
+ago.
+
+- **`basanite audit`** counts every curated entry against the corpus and buckets
+  it: reported (with its rank), matching but below the cutoff, or `NEVER FIRES`.
+  `-never` narrows to the rows worth cutting, `-days` sets the window,
+  `-list` audits a file other than your own.
+- Phrases count over the surface word stream and words over the lemmatized one,
+  since that is the stream each is written to be found in — auditing a
+  stopword-heavy phrase against the tokenized stream would call it dead for the
+  wrong reason.
+- It prints the list path it read. The first run of this command reported
+  confidently on 19 entries when the list held 28: it had been handed an empty
+  path, and `knowntics.Load` falls back to the embedded seed rather than
+  failing, which is the right graceful default everywhere except here. An audit
+  that reports on a list it never opened is the exact failure it exists to
+  catch, so the source is now explicit and printed.
+
 ## v0.6.0 (2026-08-02) — not having to read it
 
 Two ways a detected tic still reached the page. One was a budget that spent

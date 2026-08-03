@@ -17,6 +17,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/justinstimatze/basanite/internal/audit"
 	"github.com/justinstimatze/basanite/internal/cloze"
 	"github.com/justinstimatze/basanite/internal/corpus"
 	"github.com/justinstimatze/basanite/internal/detect"
@@ -49,6 +50,7 @@ usage: basanite <command> [flags]
   display         MessageDisplay entry: show the demote rung instead of the tic
   install         register the hooks in ~/.claude/settings.json (-status, -uninstall)
   ledger          flagged tics over time — is a tic's rate falling?
+  audit           which curated known-tics entries have ever fired?
   version         print version
 
 Run 'basanite <command> -h' for command flags. See README.md for data setup.
@@ -78,6 +80,8 @@ func main() {
 		err = runRefresh(args)
 	case "hook":
 		err = runHook(args)
+	case "audit":
+		err = runAudit(args)
 	case "install":
 		err = runInstall(args)
 	case "display":
@@ -603,6 +607,51 @@ func runRefresh(args []string) error {
 		status = fmt.Sprintf("%s error: %v\n", time.Now().Format(time.RFC3339), err)
 	}
 	os.WriteFile(filepath.Join(stateDir, "refresh.log"), []byte(status), 0o600)
+	return nil
+}
+
+// runAudit counts every curated known-tics entry against the corpus and says
+// whether it is reported, matching but ranked out, or dead.
+//
+// The list cannot answer this about itself: an entry that never matches looks
+// exactly like one that matches constantly, and "the ranking is working" looks
+// exactly like "the pattern is broken". Both are answered by counting.
+func runAudit(args []string) error {
+	fs := flag.NewFlagSet("audit", flag.ExitOnError)
+	var (
+		dir       = fs.String("dir", defaultDir(), "transcript root to scan")
+		days      = fs.Int("days", defaultVetDays, "how far back to count")
+		path      = fs.String("report", "", "report path (default: state dir)")
+		list      = fs.String("list", knownTicsPath(), "known-tics list to audit")
+		onlyNever = fs.Bool("never", false, "list only the entries that have never matched")
+	)
+	fs.Parse(args)
+
+	// The list path is explicit and printed. knowntics.Load falls back to the
+	// embedded seed when it cannot read the file, which for every other caller
+	// is the right graceful default and for this one is a silent lie: an audit
+	// that reports on a list it never opened is the failure it exists to catch.
+	known, _ := knowntics.Load(*list)
+	if known == nil || (len(known.Words) == 0 && len(known.Phrases) == 0) {
+		return fmt.Errorf("no known-tics list found; run `basanite report` once to seed it")
+	}
+	if *path == "" {
+		p, err := report.Path()
+		if err != nil {
+			return err
+		}
+		*path = p
+	}
+	rep, err := report.Load(*path) // absent is fine: everything is then unreported
+	if err != nil {
+		return err
+	}
+	turns, err := corpus.Read(*dir, time.Now().AddDate(0, 0, -*days))
+	if err != nil {
+		return err
+	}
+	fmt.Printf("list: %s\n", *list)
+	fmt.Print(audit.Run(known, rep, turns, *days).Render(*onlyNever))
 	return nil
 }
 
