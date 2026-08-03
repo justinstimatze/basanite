@@ -18,8 +18,8 @@ func TestSeedOnFirstRun(t *testing.T) {
 	if !s.Words["substrate"] {
 		t.Error("seeded set is missing the 'substrate' single word")
 	}
-	if countPhrase(s.Phrases, "i want to honor that") != 1 {
-		t.Error("seeded set is missing a signature phrase")
+	if countPhrase(s.Phrases, "worth noting") != 1 {
+		t.Error("seeded set is missing a multi-word phrase")
 	}
 	// a phrase must keep its interior space; a single word must not leak in
 	for _, p := range s.Phrases {
@@ -54,7 +54,10 @@ func TestUserEditsStandNoReSeed(t *testing.T) {
 	if s.Words["substrate"] {
 		t.Error("a deleted seed word must stay gone — the seed must not re-merge")
 	}
-	if countPhrase(s.Phrases, "my stock phrase") != 1 || countPhrase(s.Phrases, "i want to honor that") != 0 {
+	// "worth noting" is in the seed and not in the user's file: it must not
+	// come back. Keep this assertion pointed at a phrase the seed still
+	// carries, or it passes for the wrong reason.
+	if countPhrase(s.Phrases, "my stock phrase") != 1 || countPhrase(s.Phrases, "worth noting") != 0 {
 		t.Errorf("Load must read only the user's file, got phrases %v", s.Phrases)
 	}
 }

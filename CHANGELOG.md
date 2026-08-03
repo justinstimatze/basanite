@@ -11,9 +11,33 @@ the `load-bearing` complaint that turned out to be a budget bug two releases
 ago.
 
 - **`basanite audit`** counts every curated entry against the corpus and buckets
-  it: reported (with its rank), matching but below the cutoff, or `NEVER FIRES`.
-  `-never` narrows to the rows worth cutting, `-days` sets the window,
-  `-list` audits a file other than your own.
+  it: reported (with its rank), suppressed by the judge as a term of art,
+  matching but below the cutoff, or `NEVER FIRES`. `-never` narrows to the rows
+  worth cutting, `-days` sets the window, `-list` audits a file other than your
+  own.
+- **Term of art is its own status.** The first thing the audit found was
+  `calibration` — top-three by usage, dispersed across dozens of projects,
+  never once reported — and it called that "below cutoff", which cost an
+  investigation. The word clears every threshold, reaches the judge, and is
+  judged unsubstitutable; no rate floor will ever surface it. Ranked-out and
+  judged-out look identical from outside and have opposite fixes, so they no
+  longer share a label.
+- **The seed lost its folklore.** The list shipped with a block of iconic
+  Claude phrases taken from the community bingo card — `that's not nothing`,
+  `i want to honor that`, `the thing underneath the thing` and two more. Not
+  one of them occurs anywhere in months of transcripts. Every entry that came
+  from measured output fires; every entry that came from folklore about the
+  model does not.
+- **Rows are no longer truncated.** The entry column was narrower than the
+  longest seeded phrase, so the audit's own render cut short the one entry it
+  had a dead verdict on.
+- **A note about self-citation.** The corpus is assistant prose, and a writeup
+  of the audit is assistant prose, so writing about an entry makes that entry
+  fire. Nine phrases moved from `NEVER FIRES` to a hit or two between two runs
+  three hours apart, purely because the first run's results had been written
+  down in between — all of them at one project and one or two hits, which is
+  the signature. The render now says so when it sees rows of that shape, and
+  the `PROJ` column is what separates a lean from an echo.
 - Phrases count over the surface word stream and words over the lemmatized one,
   since that is the stream each is written to be found in — auditing a
   stopword-heavy phrase against the tokenized stream would call it dead for the

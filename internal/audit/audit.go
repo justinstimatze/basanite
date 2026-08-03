@@ -8,8 +8,11 @@
 // you overuse never shows up in a report, "the ranking is working as designed"
 // and "the pattern never matches" look identical from outside.
 //
-// So this counts every entry against the corpus and says which of the three it
-// is: reported, matching but below the cutoff, or dead.
+// So this counts every entry against the corpus and says which of the four it
+// is: reported, suppressed by the judge, matching but below the cutoff, or
+// dead. Suppressed is separated from below-cutoff because they look identical
+// from outside and have opposite fixes — a threshold moves one and will never
+// move the other.
 package audit
 
 import (
@@ -18,6 +21,7 @@ import (
 	"strings"
 
 	"github.com/justinstimatze/basanite/internal/corpus"
+	"github.com/justinstimatze/basanite/internal/judge"
 	"github.com/justinstimatze/basanite/internal/knowntics"
 	"github.com/justinstimatze/basanite/internal/phrase"
 	"github.com/justinstimatze/basanite/internal/report"
@@ -26,9 +30,10 @@ import (
 
 // Status is what the audit concluded about one entry.
 const (
-	Reported = "reported"     // in the current report
-	Below    = "below cutoff" // matches the corpus, ranked out
-	Never    = "NEVER FIRES"  // no match at all in the window
+	Reported   = "reported"     // in the current report
+	Suppressed = "term of art"  // reached the judge, judged unsubstitutable
+	Below      = "below cutoff" // matches the corpus, ranked out
+	Never      = "NEVER FIRES"  // no match at all in the window
 )
 
 // Entry is one curated term's standing against the corpus.
@@ -44,13 +49,14 @@ type Entry struct {
 
 // Result is the whole list audited, plus the corpus it was measured against.
 type Result struct {
-	Entries  []Entry
-	Tokens   int
-	Turns    int
-	Days     int
-	Reported int
-	Below    int
-	Never    int
+	Entries    []Entry
+	Tokens     int
+	Turns      int
+	Days       int
+	Reported   int
+	Suppressed int
+	Below      int
+	Never      int
 }
 
 // Run counts every curated entry over the corpus. Words are matched against
@@ -58,7 +64,10 @@ type Result struct {
 // against the surface word stream with stopwords kept, because that is the
 // stream each was written to be found in — auditing a phrase against the
 // tokenized stream would report every phrase dead for the wrong reason.
-func Run(known *knowntics.Set, rep *report.Report, turns []corpus.Turn, days int) Result {
+//
+// judged maps a word to the standing role the judge gave it, so an entry the
+// gate suppressed is not reported as merely ranked out.
+func Run(known *knowntics.Set, rep *report.Report, turns []corpus.Turn, days int, judged map[string]string) Result {
 	res := Result{Days: days, Turns: len(turns)}
 	if known == nil {
 		return res
@@ -104,8 +113,13 @@ func Run(known *knowntics.Set, rep *report.Report, turns []corpus.Turn, days int
 		switch {
 		case e.Rank > 0:
 			e.Status, res.Reported = Reported, res.Reported+1
+		// Zero hits outranks a suppression verdict: the verdict may be stale
+		// from an earlier window, but nothing matched in this one, and that is
+		// the fact that decides whether the entry earns its line.
 		case hits == 0:
 			e.Status, res.Never = Never, res.Never+1
+		case judged[term] == judge.RoleTermOfArt:
+			e.Status, res.Suppressed = Suppressed, res.Suppressed+1
 		default:
 			e.Status, res.Below = Below, res.Below+1
 		}
@@ -142,12 +156,13 @@ func (r Result) Render(onlyNever bool) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "basanite audit — %d curated entries against %d turns / %dk tokens over %dd\n",
 		len(r.Entries), r.Turns, r.Tokens/1000, r.Days)
-	fmt.Fprintf(&b, "%d reported · %d below cutoff · %d never fire\n\n", r.Reported, r.Below, r.Never)
+	fmt.Fprintf(&b, "%d reported · %d term of art · %d below cutoff · %d never fire\n\n",
+		r.Reported, r.Suppressed, r.Below, r.Never)
 	if len(r.Entries) == 0 {
 		return b.String()
 	}
 
-	fmt.Fprintf(&b, "  %-26s %7s %9s %5s  %s\n", "ENTRY", "HITS", "RATE/1K", "PROJ", "STATUS")
+	fmt.Fprintf(&b, "  %-32s %7s %9s %5s  %s\n", "ENTRY", "HITS", "RATE/1K", "PROJ", "STATUS")
 	shown := 0
 	for _, e := range r.Entries {
 		if onlyNever && e.Status != Never {
@@ -161,17 +176,53 @@ func (r Result) Render(onlyNever bool) string {
 		if e.Rank > 0 {
 			status = fmt.Sprintf("%s (#%d)", Reported, e.Rank)
 		}
-		fmt.Fprintf(&b, "  %-26s %7d %9.3f %5d  %s\n", trunc(term, 26), e.Hits, e.Rate, e.Projects, status)
+		fmt.Fprintf(&b, "  %-32s %7d %9.3f %5d  %s\n", trunc(term, 32), e.Hits, e.Rate, e.Projects, status)
 		shown++
 	}
 	if shown == 0 {
 		b.WriteString("  every entry matched at least once.\n")
 	}
-	if !onlyNever && r.Never > 0 {
+	if onlyNever {
+		return b.String()
+	}
+	if r.Never > 0 {
 		fmt.Fprintf(&b, "\nA never-fired entry is not evidence of a working filter — it is an\n"+
 			"untested pattern. `audit -never` lists just those; cut them or fix them.\n")
 	}
+	if r.Suppressed > 0 {
+		fmt.Fprintf(&b, "\nA term-of-art entry cleared every threshold and was then judged\n"+
+			"unsubstitutable. No amount of tuning will surface it; the rate is not\n"+
+			"why it is absent. See its note in verdicts.jsonl.\n")
+	}
+	// A one-hit, one-project row is usually this tool's own output being
+	// counted: writing about an entry puts it in the corpus the next scan
+	// reads. Real leans disperse.
+	if narrow := selfCited(r.Entries); narrow > 0 {
+		fmt.Fprintf(&b, "\n%d entr%s at 1–2 hits in a single project. Discussing an entry puts it\n"+
+			"in the transcripts the next audit reads, so treat those as noise unless\n"+
+			"a second project confirms them.\n", narrow, plural(narrow))
+	}
 	return b.String()
+}
+
+// selfCited counts the rows whose whole support is one project and one or two
+// hits — the signature of an entry that only appears in the corpus because
+// something wrote about it.
+func selfCited(entries []Entry) int {
+	n := 0
+	for _, e := range entries {
+		if e.Projects == 1 && e.Hits > 0 && e.Hits <= 2 {
+			n++
+		}
+	}
+	return n
+}
+
+func plural(n int) string {
+	if n == 1 {
+		return "y sits"
+	}
+	return "ies sit"
 }
 
 func trunc(s string, n int) string {

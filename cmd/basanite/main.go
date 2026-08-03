@@ -650,8 +650,22 @@ func runAudit(args []string) error {
 	if err != nil {
 		return err
 	}
+	// The judge's standing verdicts, so an entry the gate suppressed reads as
+	// suppressed rather than as merely ranked out. Best-effort: an unreadable
+	// log costs one status, never the audit.
+	judged := map[string]string{}
+	if dir, err := report.StateDir(); err == nil {
+		if st, err := judge.LoadStore(filepath.Join(dir, "verdicts.jsonl")); err == nil {
+			for w := range known.Words {
+				if r, ok := st.Latest(w); ok {
+					judged[w] = r.Role
+				}
+			}
+		}
+	}
+
 	fmt.Printf("list: %s\n", *list)
-	fmt.Print(audit.Run(known, rep, turns, *days).Render(*onlyNever))
+	fmt.Print(audit.Run(known, rep, turns, *days, judged).Render(*onlyNever))
 	return nil
 }
 

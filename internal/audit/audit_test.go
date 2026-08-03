@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/justinstimatze/basanite/internal/corpus"
+	"github.com/justinstimatze/basanite/internal/judge"
 	"github.com/justinstimatze/basanite/internal/knowntics"
 	"github.com/justinstimatze/basanite/internal/report"
 )
@@ -32,7 +33,7 @@ func TestRunSeparatesTheThreeOutcomes(t *testing.T) {
 	res := Run(known, rep, turns(
 		"the substrate is worth noting here",
 		"another substrate on the surface, worth noting",
-	), 90)
+	), 90, nil)
 
 	got := map[string]Entry{}
 	for _, e := range res.Entries {
@@ -73,7 +74,7 @@ func TestPhrasesAreNotReportedDeadByTokenization(t *testing.T) {
 		Words:   map[string]bool{},
 		Phrases: []string{"that said"},
 	}
-	res := Run(known, nil, turns("that said, the tests pass"), 30)
+	res := Run(known, nil, turns("that said, the tests pass"), 30, nil)
 	if len(res.Entries) != 1 || res.Entries[0].Hits != 1 {
 		t.Fatalf("a stopword-only phrase must still be found: %+v", res.Entries)
 	}
@@ -84,7 +85,7 @@ func TestPhrasesAreNotReportedDeadByTokenization(t *testing.T) {
 
 func TestRenderOrdersDeadEntriesLastAndCanNarrow(t *testing.T) {
 	known := &knowntics.Set{Words: map[string]bool{"substrate": true, "quokka": true}}
-	res := Run(known, nil, turns("substrate substrate"), 90)
+	res := Run(known, nil, turns("substrate substrate"), 90, nil)
 
 	full := res.Render(false)
 	if i, j := strings.Index(full, "substrate"), strings.Index(full, "quokka"); i > j {
@@ -103,8 +104,59 @@ func TestRenderOrdersDeadEntriesLastAndCanNarrow(t *testing.T) {
 	}
 }
 
+// The failure this status exists for: calibration cleared every threshold
+// (rate, dispersion, the curated route), reached the judge, and was suppressed
+// as a term of art. Reported as "below cutoff" it reads as a tuning problem,
+// and tuning will never move it.
+func TestJudgeSuppressionIsNotBelowCutoff(t *testing.T) {
+	known := &knowntics.Set{Words: map[string]bool{"calibration": true, "surface": true}}
+	judged := map[string]string{"calibration": judge.RoleTermOfArt, "surface": judge.RoleTic}
+	res := Run(known, nil, turns("calibration and surface", "more calibration here"), 90, judged)
+
+	got := map[string]Entry{}
+	for _, e := range res.Entries {
+		got[e.Term] = e
+	}
+	if got["calibration"].Status != Suppressed {
+		t.Errorf("a judged term of art must not read as ranked out: %+v", got["calibration"])
+	}
+	if got["surface"].Status != Below {
+		t.Errorf("a term the judge kept is genuinely below cutoff: %+v", got["surface"])
+	}
+	if res.Suppressed != 1 || res.Below != 1 {
+		t.Errorf("tallies wrong: %d suppressed, %d below", res.Suppressed, res.Below)
+	}
+	if out := res.Render(false); !strings.Contains(out, "term of art") {
+		t.Errorf("render must name the suppression and say tuning won't move it:\n%s", out)
+	}
+}
+
+// Writing about an entry puts it in the transcripts the next audit reads, so a
+// row supported by one project and one hit is usually the tool citing itself.
+func TestRenderFlagsSingleProjectRowsAsSelfCitation(t *testing.T) {
+	known := &knowntics.Set{Words: map[string]bool{"substrate": true, "liminal": true}}
+	// pa and pb alternate, so "substrate" disperses and "liminal" does not.
+	res := Run(known, nil, turns("substrate", "substrate", "liminal"), 90, nil)
+	out := res.Render(false)
+	if !strings.Contains(out, "1 entry sits at 1–2 hits in a single project") {
+		t.Errorf("a one-project one-hit row must be called out as self-citation:\n%s", out)
+	}
+}
+
+// Truncating an entry makes its row un-actionable: you cannot delete a line
+// you cannot read. This 30-character phrase was on the seed and reported dead,
+// and the render cut it short of its last word — so the audit's own output
+// hid the only entry the audit had a verdict on.
+func TestRenderDoesNotTruncateALongPhrase(t *testing.T) {
+	const long = "the thing underneath the thing"
+	known := &knowntics.Set{Phrases: []string{long}}
+	if out := Run(known, nil, turns("nothing here"), 90, nil).Render(false); !strings.Contains(out, long) {
+		t.Errorf("the entry column must fit the seeded phrases whole:\n%s", out)
+	}
+}
+
 func TestRunWithNoListIsEmptyNotPanic(t *testing.T) {
-	if res := Run(nil, nil, turns("anything"), 7); len(res.Entries) != 0 {
+	if res := Run(nil, nil, turns("anything"), 7, nil); len(res.Entries) != 0 {
 		t.Errorf("no curated list means nothing to audit, got %+v", res.Entries)
 	}
 }

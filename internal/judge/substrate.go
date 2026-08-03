@@ -81,6 +81,25 @@ func (s *Store) Lookup(word string, ladder []string, model string) (Record, bool
 	return r, ok
 }
 
+// Latest returns the standing verdict for word under any ladder. The cache is
+// keyed on the ladder, so a word judged against several ladders has several
+// live records; a caller asking "what did the gate decide about this word"
+// wants the newest of them. At is always RFC3339 in UTC, so string order is
+// time order.
+func (s *Store) Latest(word string) (Record, bool) {
+	var best Record
+	found := false
+	for _, r := range s.byKey {
+		if r.Word != word {
+			continue
+		}
+		if !found || r.At > best.At {
+			best, found = r, true
+		}
+	}
+	return best, found
+}
+
 // Append writes one record to the log and updates the index. The append is
 // the calibration trail; the index update is the cache.
 func (s *Store) Append(r Record) error {

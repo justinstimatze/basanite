@@ -5,8 +5,14 @@
 # Nothing here is re-applied over your edits.
 #
 # It ships as a conservative, high-precision sample of the globally common
-# leans, biased toward the ones that recur in Claude Code transcripts. Seeded
-# from the assistant-register staples and the community "Claude Bingo" card.
+# leans, biased toward the ones that recur in Claude Code transcripts.
+#
+# Every entry left here has been observed firing. An earlier seed also carried
+# the folklore leans — the iconic phrases everyone quotes, taken from the
+# community "Claude Bingo" card — and `basanite audit` found that not one of
+# them occurred anywhere in months of real transcripts. Folklore about a
+# model's register turns out not to be evidence about it. Add your own freely,
+# then audit them.
 #
 # Format mirrors proper-nouns.txt: one entry per line, '#' comments, blank
 # lines ignored. A line with a space is a phrase, matched verbatim against the
@@ -22,23 +28,13 @@
 load-bearing
 substrate
 calibration
-liminal
 texture
 
 # --- assistant-register phrases (the globally common ones) ---
 you're absolutely right
-you're absolutely correct
 great question
 happy to help
 to be clear
 worth noting
 that said
-at the end of the day
 doing a lot of work
-
-# --- signature phrases (the iconic Claude ones, seeded from the card) ---
-that's not nothing
-the thing underneath the thing
-i want to honor that
-let's stay with that
-i want to be careful here

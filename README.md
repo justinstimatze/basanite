@@ -367,20 +367,34 @@ overuse never appears in a report, "the ranking is working as designed" and
 "the pattern never matches" are indistinguishable.
 
 `basanite audit` counts every entry against the corpus and says which of the
-three it is:
+four it is:
 
 ```
-  ENTRY                         HITS   RATE/1K  PROJ  STATUS
-  substrate                     3693     0.931    50  reported (#12)
-  calibration                   1154     0.291    43  below cutoff
-  "the real point is"              0     0.000     0  NEVER FIRES
+  ENTRY                             HITS   RATE/1K  PROJ  STATUS
+  substrate                         3695     0.931    50  reported (#12)
+  calibration                       1154     0.291    43  term of art
+  texture                            314     0.079    25  below cutoff
+  "the thing underneath the thing"     0     0.000     0  NEVER FIRES
 ```
 
-Three things that buys. Dead entries become visible and can be cut, so the
-list stays honest. A `NEVER FIRES` row separates "not a problem for you" from
-"the pattern is broken". And the cutoff becomes legible — a term matching
-1,154 times across 43 projects while never reaching a report is a ranking
-decision you can now see and argue with, rather than a shrug.
+Dead entries become visible and can be cut, so the list stays honest, and a
+`NEVER FIRES` row separates "not a problem for you" from "the pattern is
+broken". The seed shipped for a while with a block of iconic phrases everyone
+quotes about Claude; the audit found that not one of them occurred anywhere in
+months of transcripts, and they have been cut. Folklore about a model's
+register turns out not to be evidence about it.
+
+`term of art` is separated from `below cutoff` because they look identical from
+outside and have opposite fixes. A word that clears every threshold, reaches
+the judge, and is judged unsubstitutable will never surface no matter how the
+rate floor moves — reading that as "ranked out" sends you tuning a number that
+was never the reason. The judge's note in `verdicts.jsonl` says why.
+
+Read the `PROJ` column before believing a row. Writing about an entry puts it
+in the transcripts the next audit reads, so an entry supported by a single hit
+in a single project is usually this tool citing its own output back to itself
+— a real lean disperses across projects. The audit says so at the bottom when
+it sees rows of that shape.
 
 Phrases are counted over the surface word stream and words over the lemmatized
 one, since that is the stream each is written to be found in; auditing a
