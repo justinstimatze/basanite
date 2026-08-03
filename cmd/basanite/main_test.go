@@ -129,10 +129,29 @@ func TestStaleReasonSeesInputChangesNotOnlyAge(t *testing.T) {
 		t.Errorf("the reason should name the version it was built by, got %q", why)
 	}
 
+	// Stub the list, so this asserts the rule and not whether this machine
+	// happens to have a known-tics file.
+	defer func(orig func() time.Time) { listModTime = orig }(listModTime)
+	listed := time.Now().Add(-time.Hour).Truncate(time.Second)
+	listModTime = func() time.Time { return listed }
+
+	matching := fresh()
+	matching.ListModified = listed
+	if why := staleReason(matching, maxAge); why != "" {
+		t.Errorf("a report built against this list is not stale, got %q", why)
+	}
 	edited := fresh()
-	edited.ListModified = time.Now().Add(-30 * 24 * time.Hour)
+	edited.ListModified = listed.Add(-30 * 24 * time.Hour)
 	if staleReason(edited, maxAge) == "" {
 		t.Error("a report built against an older list is stale")
+	}
+
+	// No list on this machine is not evidence the list changed.
+	listModTime = func() time.Time { return time.Time{} }
+	unlisted := fresh()
+	unlisted.ListModified = time.Now().Add(-30 * 24 * time.Hour)
+	if why := staleReason(unlisted, maxAge); why != "" {
+		t.Errorf("an unreadable list must not force a rebuild, got %q", why)
 	}
 }
 

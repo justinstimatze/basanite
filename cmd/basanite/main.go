@@ -551,7 +551,10 @@ const (
 // listModTime is the curated list's last edit, or the zero time when there is
 // no list to read — in which case it is not evidence of anything and the
 // staleness check ignores it.
-func listModTime() time.Time {
+// It is a var so a test can state a list mtime without depending on whether
+// the machine running the test happens to have a list — the condition that
+// made the first version of this pass locally and fail on a clean checkout.
+var listModTime = func() time.Time {
 	fi, err := os.Stat(knownTicsPath())
 	if err != nil {
 		return time.Time{}
