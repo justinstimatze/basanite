@@ -41,6 +41,12 @@ type LedgerEntry struct {
 	// unreachable" look identical from outside.
 	Injected     int       `json:"injected,omitempty"`
 	LastInjected time.Time `json:"last_injected,omitempty"`
+
+	// Known mirrors the report entry's curated flag, so the ledger can say
+	// which never-shown words are candidates for curation and which are
+	// already on the list. Without it every chronic row reads the same and
+	// the never-shown list is not a worklist.
+	Known bool `json:"known,omitempty"`
 }
 
 // Ledger maps each flagged lemma to its history. It is the persisted
@@ -101,6 +107,7 @@ func (l *Ledger) Update(rep *Report, now time.Time) {
 			l.Lemmas[e.Lemma] = le
 		}
 		le.Kind = kind
+		le.Known = e.Known
 		le.LastSeen = now
 		le.LastRate = e.Rate
 		le.Refreshes++
@@ -230,6 +237,7 @@ func (l *Ledger) Render(now time.Time) string {
 		if neverShown > 0 {
 			fmt.Fprintf(&b, "\n  %d of %d still-flagged never reached a prompt — in the report, never shown.\n",
 				neverShown, len(live))
+			writeCurationCandidates(&b, live)
 		}
 	}
 	if len(faded) > 0 {
@@ -249,10 +257,53 @@ func (l *Ledger) Render(now time.Time) string {
 // column of small numbers is not noticeable.
 func shownCount(e *LedgerEntry) string {
 	if e.Injected == 0 {
+		if e.Known {
+			// A curated word with no injections is a different problem: the
+			// instruction is on the list and still losing its slot.
+			return "curated, never shown"
+		}
 		return "never shown"
+	}
+	if e.Known {
+		return fmt.Sprintf("curated, shown %d×", e.Injected)
 	}
 	return fmt.Sprintf("shown %d×", e.Injected)
 }
+
+// curationCandidates is the worklist the never-shown tally implies: detected
+// chronic words that have held a report slot for a while and never reached a
+// prompt. Curating one is what moves it into the chronic share — see
+// DESIGN.md on why the ranking was left alone and the measurement added
+// instead. Highest rate first, because that is the order worth reading.
+func curationCandidates(live []*LedgerEntry) []*LedgerEntry {
+	var out []*LedgerEntry
+	for _, e := range live {
+		if e.Known || e.Injected > 0 || e.Kind != "chronic" || e.Refreshes < 2 {
+			continue
+		}
+		out = append(out, e)
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].LastRate > out[j].LastRate })
+	return out
+}
+
+func writeCurationCandidates(b *strings.Builder, live []*LedgerEntry) {
+	cands := curationCandidates(live)
+	if len(cands) == 0 {
+		return
+	}
+	if len(cands) > curationShortlist {
+		cands = cands[:curationShortlist]
+	}
+	b.WriteString("  Steadiest of those not on your list — add one to give it a slot:\n")
+	for _, e := range cands {
+		fmt.Fprintf(b, "    %-16s %.2f/1k over %d refreshes\n", e.Lemma, e.LastRate, e.Refreshes)
+	}
+}
+
+// curationShortlist caps the suggestion. The list is a prompt to curate, not
+// an inventory — a wall of candidates is the thing the reader skims past.
+const curationShortlist = 5
 
 func absPct(d float64) float64 {
 	if d < 0 {

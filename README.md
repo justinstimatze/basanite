@@ -27,7 +27,8 @@ basanite report          # full pipeline (scan→vet→ladder) → state file, ~
 basanite refresh         # regenerate the state file if stale (runs from both hooks)
 basanite hook            # UserPromptSubmit entry: inject the report, ~4 ms
 basanite display         # MessageDisplay entry: show the demote rung instead of the tic
-basanite ledger          # flagged tics over time — is a tic's rate falling?
+basanite ledger          # flagged tics over time — is a tic's rate falling, and did it ever reach a prompt?
+                         #   -swaps: what the display hook replaced; -verdicts: does the judge answer the same twice?
 basanite audit           # which curated known-tics entries have ever fired?
 basanite version
 ```
@@ -349,9 +350,13 @@ list entirely:
 
 ```
 still flagged:
-  substrate        since 2026-07-14 (2w, 4 refreshes)  1.08 → 0.94/1k  ↓13%  chronic
-  load-bearing     since 2026-07-14 (2w, 4 refreshes)  0.61 → 0.55/1k  ↓11%  chronic
-  running          since 2026-07-14 (2w, 4 refreshes)  1.62 → 1.80/1k  ↑11%  chronic
+  substrate        since 2026-07-14 (2w, 4 refreshes)  1.08 → 0.94/1k  ↓13%  chronic  curated, shown 4×
+  load-bearing     since 2026-07-14 (2w, 4 refreshes)  0.61 → 0.55/1k  ↓11%  chronic  curated, shown 4×
+  running          since 2026-07-14 (2w, 4 refreshes)  1.62 → 1.80/1k  ↑11%  chronic  never shown
+
+  1 of 3 still-flagged never reached a prompt — in the report, never shown.
+  Steadiest of those not on your list — add one to give it a slot:
+    running          1.80/1k over 4 refreshes
 
 faded out (dropped from the report):
   spine            2026-06-02 → gone 2026-07-14  0.71 → 0.12/1k  ↓83%  chronic
@@ -360,6 +365,36 @@ faded out (dropped from the report):
 It accrues through the `refresh` hook with nothing to run by hand. Treat it
 as a record, not a proof: a falling rate is consistent with the loop
 working, but direct callouts and topic drift are unmeasured confounds.
+
+**"Never shown" is not the same as "not flagged."** The report holds far more
+than the injection prints — the turn-start block takes three chronic entries
+and two risers — and curated entries take the chronic slots first. So a
+detected word can sit in every report for months without ever reaching a
+prompt, which from every other surface looks identical to being ranked fairly
+and losing. The shown-count is what tells them apart, and the shortlist under
+it is the answer: adding a word to `known-tics.txt` is what moves it into the
+chronic share. See DESIGN.md on why the ranking was left alone.
+
+### Is the judge stable? (`ledger -verdicts`)
+
+The verdict cache is keyed on a word's ladder, and the ladder shifts when
+tokenization does — so a word gets re-judged for reasons unrelated to how it
+is used, and near-identical ladders can come back with different answers.
+
+```
+$ basanite ledger -verdicts
+changed its answer under one unchanged prompt:
+ ! calibration      4 ladders  role: term_of_art/tic  rung: -/standardization/activity
+   load-bearing     2 ladders  role: tic              rung: bearing/supporting
+
+only disagreed across a schema bump (expected — the question was reworded):
+   half             3 ladders  role: tic              rung: part/fraction  schema 3/4
+```
+
+The `!` marks a flip across the term-of-art boundary, which decides whether
+the word appears at all. Flips that only straddle a prompt-version bump are
+listed separately and not counted — the question changed, so a different
+answer is not the gate contradicting itself.
 
 ### Auditing the curated list (`audit`)
 

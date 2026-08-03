@@ -178,3 +178,83 @@ func TestRenderNamesTheNeverShown(t *testing.T) {
 		t.Errorf("with a tally, so the scale is visible:\n%s", out)
 	}
 }
+
+// The never-shown tally is only a worklist if it separates "you already asked
+// for this and it still lost" from "this is a candidate you have not curated".
+// Both render as a chronic row otherwise.
+func TestRenderSeparatesCuratedFromCandidates(t *testing.T) {
+	base := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	l := &Ledger{}
+	for i := 0; i < 3; i++ {
+		l.Update(rep(
+			Entry{Kind: "chronic", Lemma: "substrate", Rate: 0.93, Known: true},
+			Entry{Kind: "chronic", Lemma: "texture", Rate: 0.11, Known: true},
+			Entry{Kind: "chronic", Lemma: "running", Rate: 1.82},
+			Entry{Kind: "chronic", Lemma: "confirmed", Rate: 1.78},
+		), base.AddDate(0, 0, i))
+		l.RecordInjection([]string{"substrate"}, base.AddDate(0, 0, i))
+	}
+	out := l.Render(base.AddDate(0, 0, 4))
+
+	if !strings.Contains(out, "curated, shown 3×") {
+		t.Errorf("a curated word that is reaching prompts says so:\n%s", out)
+	}
+	if !strings.Contains(out, "curated, never shown") {
+		t.Errorf("a curated word losing its slot is its own case:\n%s", out)
+	}
+	if !strings.Contains(out, "Steadiest of those not on your list") {
+		t.Errorf("the candidates get a worklist:\n%s", out)
+	}
+	// highest rate first, and only the uncurated ones
+	running := strings.Index(out, "running          1.82/1k")
+	confirmed := strings.Index(out, "confirmed        1.78/1k")
+	if running < 0 || confirmed < 0 || running > confirmed {
+		t.Errorf("candidates listed highest-rate first:\n%s", out)
+	}
+	if strings.Contains(out, "texture          0.11/1k") {
+		t.Errorf("an already-curated word is not a curation candidate:\n%s", out)
+	}
+}
+
+// A word the writer has already curated must never be suggested for
+// curation, and one that is reaching prompts is not a candidate either.
+func TestCurationCandidatesExcludeCuratedAndShown(t *testing.T) {
+	base := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	l := &Ledger{}
+	for i := 0; i < 2; i++ {
+		l.Update(rep(
+			Entry{Kind: "chronic", Lemma: "curated", Rate: 1.0, Known: true},
+			Entry{Kind: "chronic", Lemma: "shown", Rate: 1.0},
+			Entry{Kind: "chronic", Lemma: "candidate", Rate: 1.0},
+			Entry{Kind: "riser", Lemma: "passing", Rate: 9.0},
+		), base.AddDate(0, 0, i))
+		l.RecordInjection([]string{"shown"}, base.AddDate(0, 0, i))
+	}
+	var live []*LedgerEntry
+	for _, e := range l.Lemmas {
+		live = append(live, e)
+	}
+	got := curationCandidates(live)
+	if len(got) != 1 || got[0].Lemma != "candidate" {
+		var names []string
+		for _, e := range got {
+			names = append(names, e.Lemma)
+		}
+		t.Errorf("candidates = %v, want only [candidate]", names)
+	}
+}
+
+// A word seen once could be noise. The suggestion is for words that have held
+// a report slot and still never reached a prompt.
+func TestCurationCandidatesNeedMoreThanOneRefresh(t *testing.T) {
+	base := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	l := &Ledger{}
+	l.Update(rep(Entry{Kind: "chronic", Lemma: "once", Rate: 2.0}), base)
+	var live []*LedgerEntry
+	for _, e := range l.Lemmas {
+		live = append(live, e)
+	}
+	if got := curationCandidates(live); len(got) != 0 {
+		t.Errorf("one sighting is not yet a pattern: %+v", got)
+	}
+}

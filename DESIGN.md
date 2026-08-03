@@ -100,6 +100,38 @@ don't creep back:
   plain subcommand. But the build-time judge *does* use stull's `spec.Cell`
   as a standalone fence (not its machine runtime) — see below.
 - **Awareness, never prohibition** (see above).
+- **No slot rotation.** The injection's chronic share is three, curated
+  entries sort ahead of automatically-detected ones, and that ordering is a
+  total order rather than a tiebreak. So three renderable curated words take
+  every chronic slot and the detected ones are unreachable — not outranked,
+  unreachable, however high their rate. Measured on a live report: 13 chronic
+  entries, 3 curated, and the other ten had been present for seven refreshes
+  each without ever being shown, `running` at 1.82/1k and `confirmed` at 1.78
+  among them.
+
+  A rotation rule was designed for this and dropped. Retiring a word that has
+  had its turn needs somewhere to retire it *to*, and the curated bucket held
+  exactly as many renderable words as there were slots — the rule would have
+  been a no-op the day it shipped.
+
+  The behavior it would have fixed is the intended one. A curated entry is
+  the writer having said in advance that they never want to see the word; a
+  detected chronic entry is a suggestion. A standing instruction outranking a
+  suggestion is the design, and the detector still surfaces everything in
+  `basanite report`. What was actually wrong was that the starvation was
+  invisible, so "ranked below better candidates" and "structurally
+  unreachable" looked identical from outside — the same shape as the
+  never-firing curated entries that `basanite audit` was built for. The fix
+  was the measurement, not the ranking: `LedgerEntry.Injected` counts what
+  reached a prompt, distinct from `Refreshes` which counts report membership,
+  and `basanite ledger` names every word that has never been shown.
+
+  That turns the curated list into the control surface it was always meant to
+  be: read the never-shown rows, decide whether a detected word has earned a
+  standing instruction, and add it. The consequence is that the list is
+  expected to outgrow the three slots — and at that point rotation *within*
+  the curated bucket becomes real work with somewhere to retire to, which is
+  when to revisit it. Not before.
 
 ## The judge — a measured reversal (the hybrid-loop seam)
 
