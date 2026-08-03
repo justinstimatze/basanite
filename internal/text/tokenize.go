@@ -83,6 +83,54 @@ func Words(s string) []string {
 	return words
 }
 
+// NameCounts accumulates, per lemma, how often a word appears mid-sentence and
+// how often it is title-cased when it does. A word capitalized in the middle of
+// a sentence most of the time is a name — a project, a product, a tool — and no
+// ladder word substitutes for a name.
+//
+// Two exclusions carry the signal. Sentence-initial words are skipped because
+// their case says nothing. ALL-CAPS is skipped because it is emphasis and
+// acronyms, which is a different signal and a much noisier one.
+func NameCounts(s string, mid, capped map[string]int) {
+	for _, sent := range strings.FieldsFunc(Clean(s), isSentenceDelim) {
+		for i, w := range Words(sent) {
+			if i == 0 {
+				continue
+			}
+			lemma := Lemma(strings.ToLower(w))
+			if !keep(lemma) {
+				continue
+			}
+			mid[lemma]++
+			if r := []rune(w); unicode.IsUpper(r[0]) && strings.ToUpper(w) != w {
+				capped[lemma]++
+			}
+		}
+	}
+}
+
+const (
+	// NameCapFloor: above this share of title-cased mid-sentence uses, a lemma
+	// is a name and never a dilutable tic.
+	//
+	// Measured over ~120 judged words in 90 days of transcripts. Seven names
+	// landed between 65% and 98% (chrome, haiku, coop, python, doppler, wick,
+	// ruffle); the highest ordinary word was 31%; nothing at all fell between.
+	// Real leans sit at the bottom: surface 0.5%, arm 0.9%, substrate 1.7%.
+	// The floor sits in the middle of a gap that wide because it can.
+	NameCapFloor = 0.5
+	// MinNameUses is where the share stops being noise. A word with fewer
+	// mid-sentence uses than this across the whole window is orders of
+	// magnitude below the rate floor anyway, so the guard never decides it.
+	MinNameUses = 20
+)
+
+// IsName reports whether a lemma's mid-sentence capitalization marks it as a
+// name, given its mid-sentence use count and how many of those were title-cased.
+func IsName(mid, capped int) bool {
+	return mid >= MinNameUses && float64(capped)/float64(mid) >= NameCapFloor
+}
+
 func isSentenceDelim(r rune) bool {
 	return r == '.' || r == '!' || r == '?' || r == '\n' || r == ';'
 }

@@ -1,6 +1,10 @@
 package pipeline
 
 import (
+	"fmt"
+	"strings"
+
+	"github.com/justinstimatze/basanite/internal/corpus"
 	"testing"
 	"time"
 
@@ -113,4 +117,49 @@ func entry(r *report.Report, lemma string) *report.Entry {
 		}
 	}
 	return nil
+}
+
+// The guard the curated list was standing in for. A project name reaches the
+// chronic route looking exactly like a lean — steady rate, dispersed, ordinary
+// English ladder — and the judge, told outright that a product name is a term
+// of art, still called "chrome" a filler adjective meaning shiny. What the
+// corpus knows and neither of them used is that it writes a name capitalized
+// in the middle of a sentence, and a lean in lowercase.
+//
+// The control matters more than the assertion: both runs see the same turns,
+// the same counts, the same everything. Only the case differs.
+func TestNameGuardSuppressesWithoutACuratedList(t *testing.T) {
+	now := time.Now()
+	opts := Options{
+		RecentDays: 7, BaselineDays: 14,
+		Top: 8, MinCount: 5, MinRatio: 2.0,
+		MaxUses: 50, MinUses: 5,
+		Threshold: 0.97, MinClean: 0.4,
+	} // note: no ProperNouns
+
+	// Enough mid-sentence uses to clear the noise floor, written both ways.
+	extra := func(word string) []corpus.Turn {
+		ts := dogTurns(now)
+		for i := 0; i < 14; i++ {
+			ts = append(ts, corpus.Turn{Time: now.AddDate(0, 0, -1), Project: "alpha",
+				Text: fmt.Sprintf("We shipped %s release %s without any incident today.", word, strings.Repeat("x", i+1))})
+		}
+		return ts
+	}
+
+	lower, err := Build(extra("dog"), loadTestWN(t), testLoader(t), nil, now, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasEntry(lower, "dog") {
+		t.Fatal("control: written in lowercase, the same corpus must still flag dog")
+	}
+
+	upper, err := Build(extra("Dog"), loadTestWN(t), testLoader(t), nil, now, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasEntry(upper, "dog") {
+		t.Error("capitalized mid-sentence, it is a name — and no curated list said so")
+	}
 }

@@ -63,6 +63,23 @@ ago.
   and "the other arm"; the one form that would have swapped is the one that
   rarely appears. Replacements now take the original's ending, with the
   replacement's own spelling deciding the suffix (`arms` -> `branches`).
+- **Names are detected, not listed.** A project or product name reaches the
+  chronic route looking exactly like a lean: steady rate, wide dispersion, an
+  ordinary English ladder. The only defense was a hand-written
+  `proper-nouns.txt`, and the judge — told outright that a product name is a
+  term of art — called `chrome` a filler adjective meaning shiny and wrote a
+  confident paragraph on why. What separates them is how the corpus writes the
+  word. Measured across ~120 judged words in 90 days: seven names landed
+  between 65% and 98% title-cased mid-sentence, the highest ordinary word was
+  31%, and nothing fell in between. Real leans sit at the bottom — `surface`
+  0.5%, `arm` 0.9%, `substrate` 1.7%. The scan now checks that before spending
+  a judge call, and the curated list demotes to an override for what the rate
+  misses (an all-caps ticket prefix; a name that is also a common word).
+- **The guard is not silent.** `audit` gained a `read as name` status, on the
+  same principle that separated `term of art` from `below cutoff` one release
+  ago: a suppression you cannot see is indistinguishable from a broken pattern,
+  which is the failure the command exists to catch. On the live list it reports
+  zero — the guard touches nothing curated.
 
 ## v0.6.0 (2026-08-02) — not having to read it
 

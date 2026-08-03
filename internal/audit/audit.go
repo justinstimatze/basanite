@@ -31,6 +31,7 @@ import (
 // Status is what the audit concluded about one entry.
 const (
 	Reported   = "reported"     // in the current report
+	IsName     = "read as name" // capitalized mid-sentence: suppressed as a name
 	Suppressed = "term of art"  // reached the judge, judged unsubstitutable
 	Below      = "below cutoff" // matches the corpus, ranked out
 	Never      = "NEVER FIRES"  // no match at all in the window
@@ -54,6 +55,7 @@ type Result struct {
 	Turns      int
 	Days       int
 	Reported   int
+	Named      int
 	Suppressed int
 	Below      int
 	Never      int
@@ -83,9 +85,11 @@ func Run(known *knowntics.Set, rep *report.Report, turns []corpus.Turn, days int
 	wordHits := map[string]int{}
 	phraseHits := map[string]int{}
 	projects := map[string]map[string]bool{}
+	mid, capped := map[string]int{}, map[string]int{}
 	matcher := phrase.New(known.Phrases)
 
 	for _, t := range turns {
+		text.NameCounts(t.Text, mid, capped)
 		for _, tok := range text.Tokens(t.Text) {
 			res.Tokens++
 			if known.Words[tok] {
@@ -118,6 +122,11 @@ func Run(known *knowntics.Set, rep *report.Report, turns []corpus.Turn, days int
 		// the fact that decides whether the entry earns its line.
 		case hits == 0:
 			e.Status, res.Never = Never, res.Never+1
+		// Before the judge's verdict, because the name guard runs before the
+		// judge does: a name-suppressed word no longer reaches the gate, so
+		// whatever verdict it carries is from before the guard existed.
+		case !isPhrase && text.IsName(mid[term], capped[term]):
+			e.Status, res.Named = IsName, res.Named+1
 		case judged[term] == judge.RoleTermOfArt:
 			e.Status, res.Suppressed = Suppressed, res.Suppressed+1
 		default:
@@ -156,8 +165,8 @@ func (r Result) Render(onlyNever bool) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "basanite audit — %d curated entries against %d turns / %dk tokens over %dd\n",
 		len(r.Entries), r.Turns, r.Tokens/1000, r.Days)
-	fmt.Fprintf(&b, "%d reported · %d term of art · %d below cutoff · %d never fire\n\n",
-		r.Reported, r.Suppressed, r.Below, r.Never)
+	fmt.Fprintf(&b, "%d reported · %d read as name · %d term of art · %d below cutoff · %d never fire\n\n",
+		r.Reported, r.Named, r.Suppressed, r.Below, r.Never)
 	if len(r.Entries) == 0 {
 		return b.String()
 	}
@@ -193,6 +202,12 @@ func (r Result) Render(onlyNever bool) string {
 		fmt.Fprintf(&b, "\nA term-of-art entry cleared every threshold and was then judged\n"+
 			"unsubstitutable. No amount of tuning will surface it; the rate is not\n"+
 			"why it is absent. See its note in verdicts.jsonl.\n")
+	}
+	if r.Named > 0 {
+		fmt.Fprintf(&b, "\nAn entry read as a name is capitalized mid-sentence more than half\n"+
+			"the time, so the scan treats it as a project or product name and stops\n"+
+			"before the judge. If it is genuinely a lean, that is a false positive\n"+
+			"worth knowing about — this line exists so the suppression is not silent.\n")
 	}
 	// A one-hit, one-project row is usually this tool's own output being
 	// counted: writing about an entry puts it in the corpus the next scan

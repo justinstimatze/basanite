@@ -36,6 +36,17 @@ type Windows struct {
 	// surface word stream (stopwords kept), not the lemma stream.
 	Phrases        map[string]int
 	PhraseProjects map[string]map[string]bool // phrase -> projects using it
+	// The name guard's inputs: mid-sentence uses of each lemma, and how many
+	// of those were title-cased. Full window, since being a name is a property
+	// of the word rather than of a window.
+	MidUses, MidCapped map[string]int
+}
+
+// IsName reports whether the corpus writes this lemma as a name. See
+// text.NameCounts for what the two tallies mean and text.NameCapFloor for
+// where the threshold came from.
+func (w Windows) IsName(lemma string) bool {
+	return text.IsName(w.MidUses[lemma], w.MidCapped[lemma])
 }
 
 // Pass tokenizes every turn exactly once, producing the window counts for
@@ -54,9 +65,15 @@ func Pass(turns []corpus.Turn, recentStart, baselineStart time.Time, pm *phrase.
 		FullProjects:   map[string]map[string]bool{},
 		Phrases:        map[string]int{},
 		PhraseProjects: map[string]map[string]bool{},
+		MidUses:        map[string]int{},
+		MidCapped:      map[string]int{},
 	}
 	sents := cloze.NewCorpus()
 	for _, t := range turns {
+		// Case has to come off the turn text: Sentence.Raw is lowercased for
+		// the frame detector, and storing a second cased copy would double the
+		// cloze corpus for one boolean per word.
+		text.NameCounts(t.Text, w.MidUses, w.MidCapped)
 		inBaseline := !t.Time.Before(baselineStart) && t.Time.Before(recentStart)
 		inRecent := !t.Time.Before(recentStart)
 		switch {
@@ -548,11 +565,18 @@ func Build(turns []corpus.Turn, wn *wordnet.DB, loadVectors VectorLoader, jdg ju
 		// RankSubstitutes order — best empirical substitute first
 		sort.SliceStable(e.Ladder, func(a, b int) bool { return e.Ladder[a].IC < e.Ladder[b].IC })
 
-		// Deterministic proper-noun guard, ahead of the fence: a known
-		// project/tool name is never a dilutable tic, and a frequency+sense
-		// pass (human or LLM) reliably mistakes it for one. Suppressing here
-		// also saves the judge a call.
-		if opts.ProperNouns[j.lemma] {
+		// Deterministic proper-noun guard, ahead of the fence: a project or
+		// tool name is never a dilutable tic, and a frequency+sense pass
+		// (human or LLM) reliably mistakes it for one. The judge is told
+		// outright that a product name is a term of art and still called
+		// "chrome" a filler adjective meaning shiny, with a fluent paragraph
+		// on why. Suppressing here also saves the call.
+		//
+		// The curated list stays as the override for what the rate misses —
+		// an all-caps ticket prefix, a name that is also an ordinary word in
+		// lowercase — but it is no longer the only thing standing here, which
+		// is what "install and forget" requires.
+		if opts.ProperNouns[j.lemma] || w.IsName(j.lemma) {
 			continue
 		}
 

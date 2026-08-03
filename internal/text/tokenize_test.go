@@ -73,3 +73,45 @@ func TestStopwordsFiltered(t *testing.T) {
 		t.Errorf("stopword filtering: got %v, want [basically]", got)
 	}
 }
+
+// The signal that separates a project name from a lean without a curated
+// list: names are capitalized in the middle of a sentence, ordinary words
+// are not. Measured on real transcripts the gap is 31% to 65% with nothing
+// in it, which is why a flat threshold is enough.
+func TestNameCountsIgnoresSentenceStartAndAllCaps(t *testing.T) {
+	mid, capped := map[string]int{}, map[string]int{}
+	NameCounts("Chrome is fine. We ran Chrome again; the chrome trim held.", mid, capped)
+
+	// Three uses, but the sentence-initial one carries no information and is
+	// not counted at all.
+	if mid["chrome"] != 2 || capped["chrome"] != 1 {
+		t.Errorf("mid=%d capped=%d, want 2 and 1", mid["chrome"], capped["chrome"])
+	}
+
+	mid, capped = map[string]int{}, map[string]int{}
+	NameCounts("the ERROR path and the error path", mid, capped)
+	if capped["error"] != 0 {
+		t.Errorf("ALL-CAPS is emphasis, not a name: capped=%d", capped["error"])
+	}
+	if mid["error"] != 2 {
+		t.Errorf("both uses are still mid-sentence uses: mid=%d", mid["error"])
+	}
+}
+
+func TestNameCountsSkipsCodeAndNeedsEnoughUses(t *testing.T) {
+	mid, capped := map[string]int{}, map[string]int{}
+	NameCounts("we ran `Chrome` here and see internal/Chrome/main.go too", mid, capped)
+	if mid["chrome"] != 0 {
+		t.Errorf("inline code and paths are not prose: mid=%d", mid["chrome"])
+	}
+	// A handful of uses cannot tell a name from a coincidence.
+	if IsName(MinNameUses-1, MinNameUses-1) {
+		t.Error("below the use floor nothing is a name, however capitalized")
+	}
+	if !IsName(MinNameUses, MinNameUses) {
+		t.Error("at the floor, all-capitalized must read as a name")
+	}
+	if IsName(100, 49) || !IsName(100, 50) {
+		t.Error("the threshold is half of the mid-sentence uses")
+	}
+}

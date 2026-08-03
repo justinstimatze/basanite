@@ -367,12 +367,13 @@ overuse never appears in a report, "the ranking is working as designed" and
 "the pattern never matches" are indistinguishable.
 
 `basanite audit` counts every entry against the corpus and says which of the
-four it is:
+five it is:
 
 ```
   ENTRY                             HITS   RATE/1K  PROJ  STATUS
   substrate                         3695     0.931    50  reported (#12)
   calibration                       1154     0.291    43  term of art
+  chrome                            1733     0.436    31  read as name
   texture                            314     0.079    25  below cutoff
   "the thing underneath the thing"     0     0.000     0  NEVER FIRES
 ```
@@ -389,6 +390,14 @@ outside and have opposite fixes. A word that clears every threshold, reaches
 the judge, and is judged unsubstitutable will never surface no matter how the
 rate floor moves — reading that as "ranked out" sends you tuning a number that
 was never the reason. The judge's note in `verdicts.jsonl` says why.
+
+`read as name` is the same kind of fact one step earlier. A project or product
+name reaches the chronic route looking exactly like a lean — steady rate, wide
+dispersion, an ordinary English ladder — so the scan checks how the corpus
+writes the word before spending a judge call on it. A word capitalized in the
+middle of a sentence more than half the time is a name, and no ladder word
+substitutes for a name. It appears here rather than vanishing quietly, because
+a suppression you cannot see is the failure this command exists to catch.
 
 Read the `PROJ` column before believing a row. Writing about an entry puts it
 in the transcripts the next audit reads, so an entry supported by a single hit

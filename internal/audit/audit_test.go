@@ -9,6 +9,7 @@ import (
 	"github.com/justinstimatze/basanite/internal/judge"
 	"github.com/justinstimatze/basanite/internal/knowntics"
 	"github.com/justinstimatze/basanite/internal/report"
+	"github.com/justinstimatze/basanite/internal/text"
 )
 
 func turns(texts ...string) []corpus.Turn {
@@ -158,5 +159,37 @@ func TestRenderDoesNotTruncateALongPhrase(t *testing.T) {
 func TestRunWithNoListIsEmptyNotPanic(t *testing.T) {
 	if res := Run(nil, nil, turns("anything"), 7, nil); len(res.Entries) != 0 {
 		t.Errorf("no curated list means nothing to audit, got %+v", res.Entries)
+	}
+}
+
+// The condition on adding the name guard at all. A suppression the audit
+// cannot see is precisely the failure this command exists to catch — the
+// calibration hunt cost an investigation because "judged out" and "ranked
+// out" wore the same label. A new silent suppressor eight days later would
+// be the same bug wearing a different hat.
+func TestNameSuppressionIsItsOwnStatus(t *testing.T) {
+	known := &knowntics.Set{Words: map[string]bool{"chrome": true, "surface": true}}
+	// Same sentence, same counts, same everything: only the case differs.
+	texts := make([]string, text.MinNameUses)
+	for i := range texts {
+		texts[i] = "we shipped Chrome and the surface held"
+	}
+	res := Run(known, nil, turns(texts...), 90, nil)
+
+	got := map[string]Entry{}
+	for _, e := range res.Entries {
+		got[e.Term] = e
+	}
+	if got["chrome"].Status != IsName {
+		t.Errorf("a word the corpus capitalizes mid-sentence is suppressed as a name: %+v", got["chrome"])
+	}
+	if got["surface"].Status != Below {
+		t.Errorf("the lowercase control must stay below-cutoff: %+v", got["surface"])
+	}
+	if res.Named != 1 {
+		t.Errorf("tallies wrong: %d named", res.Named)
+	}
+	if out := res.Render(false); !strings.Contains(out, "read as name") {
+		t.Errorf("the guard must be visible in the render, not silent:\n%s", out)
 	}
 }
