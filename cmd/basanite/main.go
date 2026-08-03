@@ -1093,6 +1093,7 @@ func runHook(args []string) error {
 		spawnRefresh(dir)
 	}
 	var out string
+	var shown []report.Entry
 	switch {
 	case rep == nil:
 		// No report at all: basanite isn't set up here. Stay silent rather
@@ -1104,6 +1105,7 @@ func runHook(args []string) error {
 		// nothing, so a broken pipeline can't rot invisibly for weeks.
 		out = staleNote(rep.GeneratedAt, dir)
 	default:
+		shown = rep.HookEntries(*topWords, *topPhrases)
 		out = rep.RenderHook(*topWords, *topPhrases)
 	}
 	if out == "" {
@@ -1118,8 +1120,32 @@ func runHook(args []string) error {
 		return nil // injected recently in this session: silent
 	}
 	pruneMarkers(dir)
+	recordInjection(dir, shown)
 	fmt.Print(out)
 	return nil
+}
+
+// recordInjection notes which lemmas actually reached this prompt. It runs
+// only past claimInjection, so it counts injections rather than hook calls.
+//
+// Best-effort in the same sense as recordLedger: every error path is a silent
+// return. A counter is not worth failing a prompt over, and this entry point
+// must never do that.
+func recordInjection(dir string, shown []report.Entry) {
+	if len(shown) == 0 {
+		return
+	}
+	lemmas := make([]string, 0, len(shown))
+	for _, e := range shown {
+		lemmas = append(lemmas, e.Lemma)
+	}
+	path := filepath.Join(dir, report.LedgerName)
+	l, err := report.LoadLedger(path)
+	if err != nil {
+		return
+	}
+	l.RecordInjection(lemmas, time.Now())
+	_ = l.Save(path)
 }
 
 // reinjectInterval bounds how often a single session re-injects. The marker

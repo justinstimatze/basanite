@@ -31,6 +31,16 @@ type LedgerEntry struct {
 	Refreshes    int       `json:"refreshes"` // times seen flagged
 	Faded        bool      `json:"faded"`     // absent from the most recent refresh
 	FadedAt      time.Time `json:"faded_at,omitempty"`
+
+	// Injected counts the times this lemma actually reached a prompt, which
+	// is not the same as Refreshes and must never be read as if it were.
+	// Refreshes counts report membership; the injection takes a fixed handful
+	// of the report, so a word can sit in every report for months and never be
+	// shown. That gap is the whole reason the count exists: without it, "the
+	// ranking is working as designed" and "this word is structurally
+	// unreachable" look identical from outside.
+	Injected     int       `json:"injected,omitempty"`
+	LastInjected time.Time `json:"last_injected,omitempty"`
 }
 
 // Ledger maps each flagged lemma to its history. It is the persisted
@@ -102,6 +112,28 @@ func (l *Ledger) Update(rep *Report, now time.Time) {
 			le.Faded = true
 			le.FadedAt = now
 		}
+	}
+}
+
+// RecordInjection bumps the shown-count for the lemmas that actually reached
+// a prompt. Only lemmas the ledger already tracks are counted: an injected
+// word was in the report, and the refresh that built that report is what
+// creates the entry, so a miss means the ledger was cleared and inventing an
+// entry here would give it a first_flagged stamp that is not the true first
+// sighting.
+//
+// Two sessions can inject at the same moment. Save is atomic, so the file is
+// never half-written, but the later writer can still overwrite the earlier
+// one's increment. A lost count on a shown-counter is worth less than the
+// lock that would prevent it, and the hook must never block a prompt.
+func (l *Ledger) RecordInjection(lemmas []string, now time.Time) {
+	for _, lemma := range lemmas {
+		le := l.Lemmas[lemma]
+		if le == nil {
+			continue
+		}
+		le.Injected++
+		le.LastInjected = now
 	}
 }
 
@@ -180,12 +212,24 @@ func (l *Ledger) Render(now time.Time) string {
 
 	if len(live) > 0 {
 		b.WriteString("\nstill flagged:\n")
+		var neverShown int
 		for _, e := range live {
 			d := e.delta()
-			fmt.Fprintf(&b, "  %-16s since %s (%s, %d refresh%s)  %.2f → %.2f/1k  %s%.0f%%  %s\n",
+			fmt.Fprintf(&b, "  %-16s since %s (%s, %d refresh%s)  %.2f → %.2f/1k  %s%.0f%%  %s  %s\n",
 				e.Lemma, e.FirstFlagged.Format("2006-01-02"), humanAge(now.Sub(e.FirstFlagged)),
 				e.Refreshes, plural(e.Refreshes), e.FirstRate, e.LastRate,
-				arrow(d), absPct(d), e.Kind)
+				arrow(d), absPct(d), e.Kind, shownCount(e))
+			if e.Injected == 0 {
+				neverShown++
+			}
+		}
+		// The count that says whether a flagged word is doing anything. A word
+		// in every report and no prompt is not being ranked below better
+		// candidates; it is unreachable, and that reads as working from every
+		// other surface.
+		if neverShown > 0 {
+			fmt.Fprintf(&b, "\n  %d of %d still-flagged never reached a prompt — in the report, never shown.\n",
+				neverShown, len(live))
 		}
 	}
 	if len(faded) > 0 {
@@ -198,6 +242,16 @@ func (l *Ledger) Render(now time.Time) string {
 		}
 	}
 	return b.String()
+}
+
+// shownCount renders the injection tally. "never shown" is spelled out rather
+// than printed as 0, because it is the case worth noticing and a zero in a
+// column of small numbers is not noticeable.
+func shownCount(e *LedgerEntry) string {
+	if e.Injected == 0 {
+		return "never shown"
+	}
+	return fmt.Sprintf("shown %d×", e.Injected)
 }
 
 func absPct(d float64) float64 {

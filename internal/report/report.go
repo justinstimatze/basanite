@@ -167,6 +167,20 @@ func Load(path string) (*Report, error) {
 // Either lane's unused share spills to the other, so a quiet week for one still
 // fills the budget rather than shrinking the injection.
 func (r *Report) RenderHook(maxWords, maxPhrases int) string {
+	sub := &Report{GeneratedAt: r.GeneratedAt}
+	for _, e := range r.HookEntries(maxWords, maxPhrases) {
+		e.JudgeNote = firstSentence(e.JudgeNote)
+		sub.Entries = append(sub.Entries, e)
+	}
+	return sub.Render(false)
+}
+
+// HookEntries is the selection RenderHook prints: the entries that actually
+// reach the prompt, in order. Split out from the rendering because "which
+// words were shown" is a fact worth recording, and the string is a poor place
+// to read it back from — the ledger counts report membership, which differs
+// from injection precisely because this function takes three of four.
+func (r *Report) HookEntries(maxWords, maxPhrases int) []Entry {
 	if maxWords <= 0 {
 		maxWords = len(r.Entries) // 0 = uncapped, the pre-cap behavior
 	}
@@ -207,13 +221,7 @@ func (r *Report) RenderHook(maxWords, maxPhrases int) string {
 		picked = append(picked, take(chronic[min(len(chronic), chronicShare):], short)...)
 	}
 	picked = append(picked, take(phrases, maxPhrases)...)
-
-	sub := &Report{GeneratedAt: r.GeneratedAt}
-	for _, e := range picked {
-		e.JudgeNote = firstSentence(e.JudgeNote)
-		sub.Entries = append(sub.Entries, e)
-	}
-	return sub.Render(false)
+	return picked
 }
 
 func take(es []Entry, n int) []Entry {

@@ -334,3 +334,96 @@ func TestKnownTicsWinTheChronicShare(t *testing.T) {
 		t.Errorf("a curated tic lost its slot to automatic ones:\n%s", out)
 	}
 }
+
+// Curated-first is a total order, not a tiebreak, and at the shipped cap the
+// chronic share is three. So three renderable curated words take every chronic
+// slot and the automatically-detected ones are unreachable — not ranked below
+// better candidates, unreachable, however high their rate.
+//
+// Measured on a live report: 13 chronic entries, 3 of them curated, and the
+// other ten (running at 1.82/1k, confirmed at 1.78, verified at 1.60 among
+// them) had been in every report for seven refreshes without ever being shown.
+// This test exists so that stays a deliberate choice rather than a discovery.
+func TestCuratedWordsCanStarveTheChronicLane(t *testing.T) {
+	r := &Report{}
+	// the automatic ones first, as the pipeline orders them by rate
+	for i := 0; i < 10; i++ {
+		r.Entries = append(r.Entries, word("chronic", fmt.Sprintf("auto%d", i), false))
+	}
+	for i := 0; i < 3; i++ {
+		r.Entries = append(r.Entries, word("chronic", fmt.Sprintf("curated%d", i), true))
+	}
+	// risers present, so the chronic share stays at three rather than
+	// spilling into the empty riser slots
+	for i := 0; i < 3; i++ {
+		r.Entries = append(r.Entries, word("riser", fmt.Sprintf("riser%d", i), false))
+	}
+
+	shown := r.HookEntries(5, 0)
+	var chronicShown []string
+	for _, e := range shown {
+		if e.Kind == "chronic" {
+			chronicShown = append(chronicShown, e.Lemma)
+		}
+	}
+	if len(chronicShown) != 3 {
+		t.Fatalf("chronic share = %v, want three slots", chronicShown)
+	}
+	for _, got := range chronicShown {
+		if !strings.HasPrefix(got, "curated") {
+			t.Fatalf("chronic slots = %v, want all curated — the starvation is the documented behavior", chronicShown)
+		}
+	}
+
+	// And with only two curated words the third slot goes to the highest
+	// automatic one, so the lane is not closed, just full.
+	r2 := &Report{}
+	for i := 0; i < 10; i++ {
+		r2.Entries = append(r2.Entries, word("chronic", fmt.Sprintf("auto%d", i), false))
+	}
+	for i := 0; i < 2; i++ {
+		r2.Entries = append(r2.Entries, word("chronic", fmt.Sprintf("curated%d", i), true))
+	}
+	for i := 0; i < 3; i++ {
+		r2.Entries = append(r2.Entries, word("riser", fmt.Sprintf("riser%d", i), false))
+	}
+	if out := r2.RenderHook(5, 0); !strings.Contains(out, "auto0") {
+		t.Errorf("an unfilled curated share should spill to the automatic lane:\n%s", out)
+	}
+}
+
+// RenderHook must print exactly what HookEntries selects — the count is
+// recorded from one and read from the other, so a divergence would log words
+// that were never shown.
+func TestHookEntriesMatchesWhatRenderHookPrints(t *testing.T) {
+	r := &Report{}
+	for i := 0; i < 6; i++ {
+		r.Entries = append(r.Entries, word("chronic", fmt.Sprintf("chronic%d", i), i < 2))
+	}
+	for i := 0; i < 4; i++ {
+		r.Entries = append(r.Entries, word("riser", fmt.Sprintf("riser%d", i), false))
+	}
+	r.Entries = append(r.Entries, Entry{Kind: "phrase", Lemma: "worth noting", Count: 9})
+
+	out := r.RenderHook(5, 1)
+	picked := r.HookEntries(5, 1)
+	if len(picked) != 6 {
+		t.Fatalf("picked %d entries, want five words and one phrase", len(picked))
+	}
+	for _, e := range picked {
+		if !strings.Contains(out, e.Lemma) {
+			t.Errorf("%q was selected but not printed:\n%s", e.Lemma, out)
+		}
+	}
+	for _, e := range r.Entries {
+		wasPicked := false
+		for _, p := range picked {
+			if p.Lemma == e.Lemma {
+				wasPicked = true
+			}
+		}
+		if !wasPicked && strings.Contains(out, e.Lemma) {
+			t.Errorf("%q was printed but not selected — the count would miss it", e.Lemma)
+		}
+	}
+}

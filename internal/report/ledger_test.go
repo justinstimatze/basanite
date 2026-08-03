@@ -110,3 +110,71 @@ func TestLedgerRender(t *testing.T) {
 		t.Error("empty ledger must render a placeholder")
 	}
 }
+
+// Refreshes counts report membership; Injected counts what reached a prompt.
+// They diverge because the injection takes a fixed handful of the report, and
+// the whole point of the second counter is that the gap is invisible from
+// every other surface — a word in every report and no prompt looks exactly
+// like a word being ranked fairly and losing.
+func TestInjectedCountIsNotRefreshCount(t *testing.T) {
+	base := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	l := &Ledger{}
+	for i := 0; i < 5; i++ {
+		l.Update(rep(
+			Entry{Kind: "chronic", Lemma: "substrate", Rate: 0.9, Known: true},
+			Entry{Kind: "chronic", Lemma: "running", Rate: 1.8},
+		), base.AddDate(0, 0, i))
+		// only the curated word is ever picked for a slot
+		l.RecordInjection([]string{"substrate"}, base.AddDate(0, 0, i))
+	}
+
+	sub, run := l.Lemmas["substrate"], l.Lemmas["running"]
+	if sub.Refreshes != 5 || sub.Injected != 5 {
+		t.Errorf("substrate = %d refreshes / %d injected, want 5/5", sub.Refreshes, sub.Injected)
+	}
+	if run.Refreshes != 5 {
+		t.Errorf("running was in every report: refreshes=%d", run.Refreshes)
+	}
+	if run.Injected != 0 {
+		t.Errorf("running never reached a prompt: injected=%d", run.Injected)
+	}
+	if run.LastInjected.IsZero() != true {
+		t.Error("a never-injected word has no last-injected stamp")
+	}
+}
+
+// An injected lemma was in the report, and the refresh that built it is what
+// creates the ledger entry. A miss means the ledger was cleared, and inventing
+// an entry here would stamp a first_flagged that is not the true first
+// sighting — the one property TestLedgerLifecycle pins down.
+func TestRecordInjectionDoesNotInventEntries(t *testing.T) {
+	l := &Ledger{Lemmas: map[string]*LedgerEntry{}}
+	l.RecordInjection([]string{"ghost"}, time.Now())
+	if _, ok := l.Lemmas["ghost"]; ok {
+		t.Error("an untracked lemma must not be created by the shown-counter")
+	}
+}
+
+// The render has to say "never shown" out loud. A zero in a column of small
+// numbers is not noticeable, and unnoticeable is the failure mode this counter
+// exists to end.
+func TestRenderNamesTheNeverShown(t *testing.T) {
+	base := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	l := &Ledger{}
+	l.Update(rep(
+		Entry{Kind: "chronic", Lemma: "substrate", Rate: 0.9},
+		Entry{Kind: "chronic", Lemma: "running", Rate: 1.8},
+	), base)
+	l.RecordInjection([]string{"substrate"}, base)
+
+	out := l.Render(base.AddDate(0, 0, 1))
+	if !strings.Contains(out, "shown 1×") {
+		t.Errorf("an injected word shows its count:\n%s", out)
+	}
+	if !strings.Contains(out, "never shown") {
+		t.Errorf("and one that never reached a prompt says so:\n%s", out)
+	}
+	if !strings.Contains(out, "1 of 2 still-flagged never reached a prompt") {
+		t.Errorf("with a tally, so the scale is visible:\n%s", out)
+	}
+}
