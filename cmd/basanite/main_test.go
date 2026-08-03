@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/justinstimatze/basanite/internal/report"
 )
 
 func TestValidSessionID(t *testing.T) {
@@ -91,5 +93,61 @@ func TestStaleNoteSurfacesRefreshError(t *testing.T) {
 	// no log at all: the note still renders, just without the error clause
 	if lastRefreshError(t.TempDir()) != "" {
 		t.Error("a missing refresh.log must yield an empty error, not a fabricated one")
+	}
+}
+
+// The rule that used to be the only one — age — cannot see the two changes
+// most likely to matter: you edited the list, or you upgraded the tool. Both
+// leave GeneratedAt exactly where it was.
+func TestStaleReasonSeesInputChangesNotOnlyAge(t *testing.T) {
+	const maxAge = 6 * 24 * time.Hour
+	fresh := func() *report.Report {
+		return &report.Report{
+			GeneratedAt:  time.Now().Add(-time.Hour),
+			Version:      buildVersion(),
+			ListModified: listModTime(),
+		}
+	}
+	if why := staleReason(fresh(), maxAge); why != "" {
+		t.Errorf("a matching report is not stale, got %q", why)
+	}
+	if staleReason(nil, maxAge) == "" {
+		t.Error("no report at all is the most stale a report can be")
+	}
+
+	old := fresh()
+	old.GeneratedAt = time.Now().Add(-7 * 24 * time.Hour)
+	if staleReason(old, maxAge) == "" {
+		t.Error("the clock rule must still fire")
+	}
+
+	upgraded := fresh()
+	upgraded.Version = "v0.0.1-something-else"
+	if why := staleReason(upgraded, maxAge); why == "" {
+		t.Error("a report built by another version is stale however recent")
+	} else if !strings.Contains(why, "v0.0.1-something-else") {
+		t.Errorf("the reason should name the version it was built by, got %q", why)
+	}
+
+	edited := fresh()
+	edited.ListModified = time.Now().Add(-30 * 24 * time.Hour)
+	if staleReason(edited, maxAge) == "" {
+		t.Error("a report built against an older list is stale")
+	}
+}
+
+// Two binaries alternating at one path would otherwise rebuild every prompt:
+// the version never matches, and unlike age that condition never resolves.
+func TestStaleReasonHoldsOffOnAJustBuiltReport(t *testing.T) {
+	justBuilt := &report.Report{GeneratedAt: time.Now(), Version: "some-other-build"}
+	if why := staleReason(justBuilt, 6*24*time.Hour); why != "" {
+		t.Errorf("an input change must not retrigger inside the interval, got %q", why)
+	}
+	older := &report.Report{
+		GeneratedAt: time.Now().Add(-minRefreshInterval - time.Minute),
+		Version:     "some-other-build",
+	}
+	if staleReason(older, 6*24*time.Hour) == "" {
+		t.Error("past the interval the input change must fire")
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime/debug"
@@ -526,11 +527,82 @@ func buildAndSave(dir, dataDir, out string, vetDays int, jdg judge.Judger, opts 
 	if err != nil {
 		return nil, err
 	}
+	rep.Version, rep.ListModified = buildVersion(), listModTime()
 	if err := rep.Save(out); err != nil {
 		return nil, err
 	}
 	recordLedger(rep, filepath.Dir(out), now)
 	return rep, nil
+}
+
+const (
+	// defaultReportMaxAge is when a report goes stale on the clock alone.
+	defaultReportMaxAge = 6 * 24 * time.Hour
+	// minRefreshInterval bounds how often an input change may trigger a
+	// rebuild. The clock rule is self-limiting; the version and list rules are
+	// not, and two binaries alternating at one path would otherwise rebuild on
+	// every prompt.
+	minRefreshInterval = 15 * time.Minute
+)
+
+// listModTime is the curated list's last edit, or the zero time when there is
+// no list to read — in which case it is not evidence of anything and the
+// staleness check ignores it.
+func listModTime() time.Time {
+	fi, err := os.Stat(knownTicsPath())
+	if err != nil {
+		return time.Time{}
+	}
+	return fi.ModTime()
+}
+
+// staleReason says why a report needs regenerating, or "" if it does not. It
+// is worded for refresh.log, which is the only place anyone reads it.
+//
+// Age is the weakest of the three rules and was for a while the only one: a
+// report can be minutes old and still describe a list you have since edited or
+// a pipeline two versions back, and neither shows up in its timestamp.
+func staleReason(rep *report.Report, maxAge time.Duration) string {
+	if rep == nil {
+		return "no report yet"
+	}
+	age := time.Since(rep.GeneratedAt)
+	if age >= maxAge {
+		return fmt.Sprintf("older than %s", maxAge)
+	}
+	if age < minRefreshInterval {
+		return "" // just built: give the input rules room to settle
+	}
+	if v := buildVersion(); rep.Version != v {
+		was := rep.Version
+		if was == "" {
+			was = "an unstamped build"
+		}
+		return fmt.Sprintf("built by %s, running %s", was, v)
+	}
+	if m := listModTime(); !m.IsZero() && !m.Equal(rep.ListModified) {
+		return "known-tics list edited since"
+	}
+	return ""
+}
+
+// spawnRefresh starts a detached `basanite refresh` and returns at once.
+//
+// The caller is a UserPromptSubmit hook whose stdout is the injection itself,
+// so the child must never inherit it and the prompt must never wait on it: the
+// pipeline takes minutes. Report.Save renames a temp file into place, so a
+// child killed partway leaves the previous report whole, and the refresh lock
+// is stealable after an hour if one dies holding it.
+func spawnRefresh() {
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	cmd := exec.Command(exe, "refresh")
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = nil, nil, nil
+	if cmd.Start() == nil {
+		_ = cmd.Process.Release()
+	}
 }
 
 // recordLedger folds this refresh into the persisted before/after ledger,
@@ -558,7 +630,7 @@ func runRefresh(args []string) error {
 	var (
 		dir     = fs.String("dir", defaultDir(), "transcript root to scan")
 		dataDir = fs.String("data", defaultDataDir(), "directory holding dict/, wordnet_ic/, vectors/")
-		maxAge  = fs.Duration("max-age", 6*24*time.Hour, "regenerate when the report is older than this")
+		maxAge  = fs.Duration("max-age", defaultReportMaxAge, "regenerate when the report is older than this")
 	)
 	if fs.Parse(args) != nil {
 		return nil
@@ -568,8 +640,11 @@ func runRefresh(args []string) error {
 	if err != nil {
 		return nil
 	}
-	if rep, err := report.Load(path); err == nil && rep != nil && time.Since(rep.GeneratedAt) < *maxAge {
-		return nil // fresh enough
+	why := "no report yet"
+	if rep, err := report.Load(path); err == nil {
+		if why = staleReason(rep, *maxAge); why == "" {
+			return nil // fresh enough
+		}
 	}
 
 	stateDir, err := report.StateDir()
@@ -602,9 +677,9 @@ func runRefresh(args []string) error {
 	opts := defaultReportOptions()
 	applyKnownTics(&opts)
 	rep, err := buildAndSave(*dir, *dataDir, path, defaultVetDays, jdg, opts)
-	status := fmt.Sprintf("%s ok: %d entries\n", time.Now().Format(time.RFC3339), entryCount(rep))
+	status := fmt.Sprintf("%s ok: %d entries (%s)\n", time.Now().Format(time.RFC3339), entryCount(rep), why)
 	if err != nil {
-		status = fmt.Sprintf("%s error: %v\n", time.Now().Format(time.RFC3339), err)
+		status = fmt.Sprintf("%s error: %v (%s)\n", time.Now().Format(time.RFC3339), err, why)
 	}
 	os.WriteFile(filepath.Join(stateDir, "refresh.log"), []byte(status), 0o600)
 	return nil
@@ -961,6 +1036,15 @@ func runHook(args []string) error {
 	rep, err := report.Load(*path)
 	if err != nil {
 		return nil
+	}
+	// Staleness is checked here, on every prompt, and not only at SessionStart.
+	// A session that runs for days evaluates a SessionStart rule exactly once —
+	// at the moment the report is newest — so the interval it enforces is not
+	// six days but however long the session stays open. The check is a stat and
+	// two comparisons; the rebuild it may start is detached and the current
+	// prompt is served from the report already in hand.
+	if rep != nil && staleReason(rep, defaultReportMaxAge) != "" {
+		spawnRefresh()
 	}
 	var out string
 	switch {

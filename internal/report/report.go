@@ -56,6 +56,13 @@ type Report struct {
 	GeneratedAt  time.Time `json:"generated_at"`
 	RecentDays   int       `json:"recent_days"`
 	BaselineDays int       `json:"baseline_days"`
+	// What produced this report, so "stale" can mean the inputs changed and
+	// not only that the clock ran out. A report built by an older binary or
+	// against an older curated list is stale however recently it was written,
+	// and nothing else records that: editing the list and upgrading the tool
+	// both leave GeneratedAt untouched.
+	Version      string    `json:"version,omitempty"`
+	ListModified time.Time `json:"list_modified,omitempty"`
 	Entries      []Entry   `json:"entries"`
 }
 
