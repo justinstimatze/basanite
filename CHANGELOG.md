@@ -75,6 +75,26 @@ ago.
   0.5%, `arm` 0.9%, `substrate` 1.7%. The scan now checks that before spending
   a judge call, and the curated list demotes to an override for what the rate
   misses (an all-caps ticket prefix; a name that is also a common word).
+- **The report refreshes on a clock that actually ticks.** The staleness check
+  ran only at `SessionStart`, which for a session left open across days is
+  evaluated exactly once — at the moment the report is newest. The interval it
+  enforced was therefore not six days but however long the session stayed open.
+  It now also runs on `UserPromptSubmit`, where the binary is invoked every
+  prompt anyway: a stat and two comparisons, and the rebuild it may start is
+  detached, so the prompt is served from the report already in hand.
+- **Staleness counts the inputs, not just the clock.** Editing `known-tics.txt`
+  and upgrading basanite both leave `generated_at` exactly where it was, so a
+  report could be minutes old and describe a list you had already changed. The
+  report now records the version that built it and the list's mtime, and a
+  mismatch in either counts as stale. Upgrading therefore takes effect on the
+  next prompt rather than up to six days later.
+- **Attempts back off, outcomes do not.** A refresh that fails leaves the
+  report exactly as stale as it found it, and no timestamp on the report can
+  express "tried and could not" — so checking every prompt would have meant a
+  broken pipeline starting a fresh attempt on every prompt, forever. Nothing
+  automatic retries within fifteen minutes of the last attempt, success or
+  failure; `refresh.log`'s mtime is the clock. Run by hand, `refresh` still
+  runs.
 - **The guard is not silent.** `audit` gained a `read as name` status, on the
   same principle that separated `term of art` from `below cutoff` one release
   ago: a suppression you cannot see is indistinguishable from a broken pattern,

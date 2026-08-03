@@ -24,7 +24,7 @@ basanite ladder <word>…  # specificity ladder per sense, weakest → strongest
 basanite vet <word>…     # judge candidates against your own past sentences
 basanite report          # full pipeline (scan→vet→ladder) → state file, ~1 min
                          #   judges out terms of art by default; --judge=false for deterministic-only
-basanite refresh         # regenerate the state file if stale (SessionStart entry)
+basanite refresh         # regenerate the state file if stale (runs from both hooks)
 basanite hook            # UserPromptSubmit entry: inject the report, ~4 ms
 basanite display         # MessageDisplay entry: show the demote rung instead of the tic
 basanite ledger          # flagged tics over time — is a tic's rate falling?
@@ -66,13 +66,18 @@ The three hooks `install` registers, and what each is for:
 | event | command | why |
 | --- | --- | --- |
 | `SessionStart` | `basanite refresh` | regenerate the report when it goes stale. Exits instantly when it's fresh, regenerates in the background when not (`async`, so it never delays the session), single-flights via a lock file, and logs each attempt to `refresh.log` in the state dir. |
-| `UserPromptSubmit` | `basanite hook` | inject tic awareness at turn start, ~4 ms. |
+| `UserPromptSubmit` | `basanite hook` | inject tic awareness at turn start, ~4 ms. Also checks staleness and starts a detached `refresh` when needed — `SessionStart` fires once per session, and a session can run for weeks. |
 | `MessageDisplay` | `basanite display` | render the demote rung instead of the tic, ~4 ms. See [below](#not-having-to-read-it-display) — this one is optional and changes only what you read. |
 
-The report goes stale after 7 days, and the hook then injects a one-line
-breadcrumb instead of silently serving nothing. With the `SessionStart`
-refresher registered this maintains itself; without it, re-run
-`basanite report` now and then.
+A report is stale once it is older than six days, or once it was built by a
+different version of basanite, or once you have edited the known-tics list
+since — age alone cannot see the last two, and both leave the timestamp
+exactly where it was. Past seven days the hook gives up on it and injects a
+one-line breadcrumb rather than silently serving nothing.
+
+Regeneration is automatic and needs no attention. Attempts back off fifteen
+minutes from the last one, recorded in `refresh.log`, so a pipeline that
+cannot run retries occasionally instead of on every prompt.
 
 ## How it works
 
@@ -366,8 +371,8 @@ for it. The same blind spot hides the opposite case: when a word you know you
 overuse never appears in a report, "the ranking is working as designed" and
 "the pattern never matches" are indistinguishable.
 
-`basanite audit` counts every entry against the corpus and says which of the
-five it is:
+`basanite audit` counts every entry against the corpus and says where it
+stands:
 
 ```
   ENTRY                             HITS   RATE/1K  PROJ  STATUS

@@ -46,7 +46,7 @@ usage: basanite <command> [flags]
   ladder <word>…  specificity ladder per sense, weakest → strongest
   vet <word>…     judge candidates against your own past sentences
   report          full pipeline (scan→vet→ladder) → state file
-  refresh         regenerate the state file if stale (SessionStart entry)
+  refresh         regenerate the state file if stale (runs from both hooks)
   hook            UserPromptSubmit entry: inject the report
   display         MessageDisplay entry: show the demote rung instead of the tic
   install         register the hooks in ~/.claude/settings.json (-status, -uninstall)
@@ -538,6 +538,9 @@ func buildAndSave(dir, dataDir, out string, vetDays int, jdg judge.Judger, opts 
 const (
 	// defaultReportMaxAge is when a report goes stale on the clock alone.
 	defaultReportMaxAge = 6 * 24 * time.Hour
+	// refreshLogName holds the outcome of the last refresh attempt. Its mtime
+	// doubles as the attempt clock spawnRefresh backs off against.
+	refreshLogName = "refresh.log"
 	// minRefreshInterval bounds how often an input change may trigger a
 	// rebuild. The clock rule is self-limiting; the version and list rules are
 	// not, and two binaries alternating at one path would otherwise rebuild on
@@ -593,7 +596,18 @@ func staleReason(rep *report.Report, maxAge time.Duration) string {
 // pipeline takes minutes. Report.Save renames a temp file into place, so a
 // child killed partway leaves the previous report whole, and the refresh lock
 // is stealable after an hour if one dies holding it.
-func spawnRefresh() {
+//
+// The backoff is on attempts, not outcomes, and it is what makes checking
+// every prompt safe. A refresh that fails leaves the report exactly as stale
+// as it found it, so a broken pipeline would otherwise start a fresh attempt
+// on every prompt for as long as it stayed broken — the report's own timestamp
+// cannot express "tried and could not". refresh.log is written on success and
+// failure alike, so its mtime is the attempt clock. Only this path backs off:
+// `basanite refresh` run by hand still runs.
+func spawnRefresh(stateDir string) {
+	if refreshBackedOff(stateDir) {
+		return
+	}
 	exe, err := os.Executable()
 	if err != nil {
 		return
@@ -620,10 +634,23 @@ func recordLedger(rep *report.Report, dir string, now time.Time) {
 	_ = l.Save(path)
 }
 
-// runRefresh is the SessionStart entry point: regenerate the report in the
-// background when it has gone stale, silently and at most one at a time.
-// Like the hook, it must never fail loudly — the outcome of each attempt
-// is recorded in refresh.log in the state dir for debugging.
+// refreshBackedOff reports whether an attempt was made too recently to make
+// another one. refresh.log is written on success and on failure alike, so its
+// mtime is the attempt clock — which is the one the automatic path needs, since
+// a failed attempt moves no other timestamp.
+func refreshBackedOff(stateDir string) bool {
+	fi, err := os.Stat(filepath.Join(stateDir, refreshLogName))
+	return err == nil && time.Since(fi.ModTime()) < minRefreshInterval
+}
+
+// runRefresh regenerates the report when it has gone stale, silently and at
+// most one at a time. It is the SessionStart entry point and is also what
+// spawnRefresh starts from the prompt hook, because SessionStart alone fires
+// once per session and a session can run for weeks.
+//
+// Like the hook, it must never fail loudly — the outcome of each attempt is
+// recorded in refresh.log in the state dir, which doubles as the clock the
+// automatic path backs off against.
 func runRefresh(args []string) error {
 	fs := flag.NewFlagSet("refresh", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -681,7 +708,7 @@ func runRefresh(args []string) error {
 	if err != nil {
 		status = fmt.Sprintf("%s error: %v (%s)\n", time.Now().Format(time.RFC3339), err, why)
 	}
-	os.WriteFile(filepath.Join(stateDir, "refresh.log"), []byte(status), 0o600)
+	os.WriteFile(filepath.Join(stateDir, refreshLogName), []byte(status), 0o600)
 	return nil
 }
 
@@ -1044,7 +1071,7 @@ func runHook(args []string) error {
 	// two comparisons; the rebuild it may start is detached and the current
 	// prompt is served from the report already in hand.
 	if rep != nil && staleReason(rep, defaultReportMaxAge) != "" {
-		spawnRefresh()
+		spawnRefresh(dir)
 	}
 	var out string
 	switch {
@@ -1122,7 +1149,7 @@ func staleNote(generatedAt time.Time, stateDir string) string {
 // lastRefreshError returns the message from the most recent error line in
 // refresh.log, or "" when the log is absent or clean.
 func lastRefreshError(stateDir string) string {
-	b, err := os.ReadFile(filepath.Join(stateDir, "refresh.log"))
+	b, err := os.ReadFile(filepath.Join(stateDir, refreshLogName))
 	if err != nil {
 		return ""
 	}

@@ -151,3 +151,32 @@ func TestStaleReasonHoldsOffOnAJustBuiltReport(t *testing.T) {
 		t.Error("past the interval the input change must fire")
 	}
 }
+
+// Checking every prompt is only safe because failures back off. A refresh
+// that fails leaves the report exactly as stale as it found it, and the
+// report's own timestamp cannot express "tried and could not" — so without
+// this, a broken pipeline starts a fresh attempt on every prompt for as long
+// as it stays broken.
+func TestSpawnRefreshBacksOffOnRecentAttempt(t *testing.T) {
+	dir := t.TempDir()
+	log := filepath.Join(dir, refreshLogName)
+
+	// A just-written log means an attempt just happened, outcome irrelevant.
+	if err := os.WriteFile(log, []byte("error: no data dir\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if !refreshBackedOff(dir) {
+		t.Error("an attempt inside the interval must not start another")
+	}
+
+	old := time.Now().Add(-minRefreshInterval - time.Minute)
+	if err := os.Chtimes(log, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if refreshBackedOff(dir) {
+		t.Error("past the interval the next attempt must be allowed")
+	}
+	if refreshBackedOff(t.TempDir()) {
+		t.Error("no log at all means nothing has been tried yet")
+	}
+}
