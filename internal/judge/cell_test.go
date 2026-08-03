@@ -120,3 +120,78 @@ func TestJudgeFailsSafeOnAPIError(t *testing.T) {
 		t.Error("an API error must fail safe to the un-gated entry")
 	}
 }
+
+// A refused verdict must not become a permanent one. The record is appended
+// before the safety check runs, so serving it back as a cache hit means the
+// word fails safe on every future run for that ladder — silently, and
+// unrecoverably short of a schema bump. This is not hypothetical: relaxing
+// Safety to allow "tic with nothing to offer" left six words stuck behind
+// their own earlier refusals until this was fixed.
+func TestRefusedVerdictIsNotServedFromCache(t *testing.T) {
+	// first call is incoherent (a term of art offering a swap) and gets
+	// refused; every call after it is a clean tic verdict
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		verdict := map[string]any{"role": "tic", "demote_to": "layer", "note": "loose"}
+		if calls == 1 {
+			verdict = map[string]any{"role": "term_of_art", "demote_to": "layer", "note": "x"}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"content": []map[string]any{
+			{"type": "tool_use", "name": "verdict", "input": verdict},
+		}})
+	}))
+	t.Cleanup(srv.Close)
+
+	j := testJudge(t, srv.URL)
+	ladder := []string{"layer", "surface"}
+	samples := [][]string{{"the", "substrate", "holds"}}
+
+	if _, ok := j.Judge("substrate", ladder, samples); ok {
+		t.Fatal("precondition: the incoherent verdict should have been refused")
+	}
+	if r, found := j.store.Lookup("substrate", ladder, j.model); !found || r.Safe {
+		t.Fatal("precondition: the refusal should be recorded as calibration data")
+	}
+
+	// Same word, same ladder, same schema. A refusal is not an answer, so the
+	// gate must ask again rather than serve it back.
+	v, ok := j.Judge("substrate", ladder, samples)
+	if !ok || v.Role != RoleTic || v.DemoteTo != "layer" {
+		t.Fatalf("verdict = %+v ok=%v, want the fresh tic verdict", v, ok)
+	}
+	if calls != 2 {
+		t.Errorf("server calls = %d, want 2 — the refusal must not short-circuit the retry", calls)
+	}
+}
+
+// audit reads verdicts through Latest, which did not apply the condition
+// Judge applies. So a word could be reported as a suppressed term of art on
+// the strength of a verdict the gate itself threw away.
+func TestLatestSkipsARefusedVerdict(t *testing.T) {
+	st, err := LoadStore(filepath.Join(t.TempDir(), "verdicts.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	refused := Record{
+		Word: "substrate", LadderHash: LadderHash([]string{"layer"}), Model: "m",
+		SchemaVersion: SchemaVersion, Role: RoleTermOfArt, DemoteTo: "layer",
+		WellFormed: true, Safe: false, At: "2026-01-01T00:00:00Z",
+	}
+	if err := st.Append(refused); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := st.Latest("substrate"); ok {
+		t.Fatal("Latest must skip a refused verdict the way Judge does")
+	}
+
+	// and it still returns a later well-formed one
+	good := refused
+	good.Role, good.DemoteTo, good.Safe, good.At = RoleTic, "layer", true, "2026-01-02T00:00:00Z"
+	if err := st.Append(good); err != nil {
+		t.Fatal(err)
+	}
+	if r, ok := st.Latest("substrate"); !ok || r.Role != RoleTic {
+		t.Errorf("Latest = %+v ok=%v, want the accepted tic verdict", r, ok)
+	}
+}

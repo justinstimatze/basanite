@@ -65,12 +65,18 @@ func New(stateDir, dataDir, model string) (*cellJudge, error) {
 // Judge classifies one word, caching the verdict by word+ladder+model+schema.
 // A transient API error or an inconclusive fence (malformed/incoherent
 // verdict) returns ok=false so the caller keeps its un-gated behavior; only a
-// well-formed, safe verdict is acted on — and only it is cached.
+// well-formed, safe verdict is acted on.
+//
+// A refused verdict is written to the log — it is calibration data, and the
+// log is append-only for exactly that reason — but it is not treated as a
+// cached answer. Serving it back would make the refusal permanent: the word
+// would fail safe on every future run for that ladder, silently, with no
+// surface reporting it and no way to recover short of a schema bump. A
+// refusal means the gate has no answer, and the way to get one is to ask
+// again. The retry costs one call per report run, and only for the words
+// that actually failed.
 func (j *cellJudge) Judge(word string, ladder []string, samples [][]string) (Verdict, bool) {
-	if r, ok := j.store.Lookup(word, ladder, j.model); ok {
-		if !r.WellFormed || !r.Safe {
-			return Verdict{}, false
-		}
+	if r, ok := j.store.Lookup(word, ladder, j.model); ok && r.WellFormed && r.Safe {
 		return Verdict{Role: r.Role, DemoteTo: r.DemoteTo, Note: r.Note}, true
 	}
 

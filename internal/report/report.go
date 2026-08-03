@@ -356,6 +356,12 @@ func (e Entry) renderable() bool {
 	return e.Kind == "phrase" || len(trimLadder(e.Ladder, e.Lemma)) >= 2
 }
 
+// TrimLadder returns the window the reader is shown: the four rungs below the
+// lemma, plus the lemma itself. Exported because the judge must be offered
+// exactly this — anything wider and the chosen rung can be a word stronger
+// than the lemma, or one the injection never displayed.
+func TrimLadder(rungs []Rung, lemma string) []Rung { return trimLadder(rungs, lemma) }
+
 func trimLadder(rungs []Rung, lemma string) []Rung {
 	self := len(rungs) - 1
 	for i, r := range rungs {

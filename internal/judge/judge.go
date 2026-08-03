@@ -27,7 +27,9 @@ import (
 // SchemaVersion tags persisted verdicts; bump it when the schema or the
 // instructions change so the cache invalidates rather than serving a verdict
 // the current prompt would not produce.
-const SchemaVersion = 3
+// 4: the tic arm may answer "none" when no offered rung preserves the sense,
+// and the demote list is the trimmed window rather than the whole ladder.
+const SchemaVersion = 4
 
 // Roles a flagged word can play in the writer's usage.
 const (
@@ -108,10 +110,20 @@ func Grammar(ladder []string) func(string) (string, bool) {
 
 // Safety returns a stull-compatible Safety (func(string)bool): it rejects
 // *incoherent* verdicts so they fail safe rather than reach the report. A term
-// of art that offers a demotion contradicts itself; a tic with no demotion is
-// not actionable awareness. This is the safety stage earning its keep — the
-// term denotes something the pipeline will act on (show, suppress, or demote),
-// so an incoherent term must not pass.
+// of art that offers a demotion contradicts itself. This is the safety stage
+// earning its keep — the term denotes something the pipeline will act on
+// (show, suppress, or demote), so an incoherent term must not pass.
+//
+// A tic that names no rung used to be rejected here as "not actionable
+// awareness". It is actionable: the injection shows the ladder and the note
+// whatever the verdict, and demote_to drives only the display swap. So the
+// verdict "you reach for this word loosely, and nothing offered replaces it"
+// is coherent and worth keeping — it is the honest answer when the ladder
+// carries only rungs from a sense the writer never uses.
+//
+// Rejecting it was also expensive out of proportion. The record is appended
+// before this check runs (cell.go), so a refusal cost the word its role and
+// its note as well as its rung, and left it un-gated with nothing saying so.
 func Safety() func(string) bool {
 	return func(term string) bool {
 		role, demote, ok := strings.Cut(term, ":")
@@ -121,10 +133,8 @@ func Safety() func(string) bool {
 		switch role {
 		case RoleTermOfArt:
 			return demote == noDemote // must offer no substitute
-		case RoleTic:
-			return demote != noDemote // must name the truer rung
-		case RoleMixed:
-			return true // may or may not demote
+		case RoleTic, RoleMixed:
+			return true // may name a rung, or report that none fits
 		}
 		return false
 	}
@@ -153,7 +163,7 @@ You are given a WORD, a LADDER of candidate weaker or more-general replacements,
 
 Choose role:
 - "term_of_art": the word has a fixed technical referent in these uses (a named API concept, a domain term, or a proper noun — a project, tool, or product name). No ladder word preserves the meaning. demote_to MUST be "none".
-- "tic": the word is reached for loosely across these uses; a weaker or more general ladder word would often be truer. demote_to MUST be one ladder word — the best general-direction replacement.
+- "tic": the word is reached for loosely across these uses; a weaker or more general ladder word would often be truer. demote_to is the best general-direction replacement — or "none" if no offered word preserves the writer's sense. "none" is the right answer, not a failure: the ladder is built from every dictionary sense of the word, so it often carries rungs from a sense the writer never uses, and awareness with no substitute beats a substitute that means something else.
 - "mixed": both — a term of art in some uses, loose in others. demote_to may be a ladder word (for the loose uses) or "none".
 
 Rules:

@@ -163,3 +163,83 @@ func TestNameGuardSuppressesWithoutACuratedList(t *testing.T) {
 		t.Error("capitalized mid-sentence, it is a name — and no curated list said so")
 	}
 }
+
+// recordingJudge captures what the gate was actually offered, which is the
+// thing under test — the verdict it returns is incidental.
+type recordingJudge struct {
+	seen map[string][]string
+	v    judge.Verdict
+}
+
+func (r *recordingJudge) Judge(word string, ladder []string, _ [][]string) (judge.Verdict, bool) {
+	r.seen[word] = ladder
+	return r.v, true
+}
+
+// The reader is shown four rungs below the lemma; the gate used to be handed
+// the whole ladder, which spans both directions around it. So the rung it
+// chose could be stronger than the word it was demoting, or one the injection
+// never displayed — a swap naming a word you were never offered. Measured on
+// a live report before this: 9 of 21 outside the window, 2 inverted.
+func TestDemoteOptionsAreOnlyTheWindowTheReaderSees(t *testing.T) {
+	// A lemma sitting mid-ladder, which is the case the bug needed and the
+	// test fixture's own corpus cannot produce (dog's ladder is [entity dog]).
+	ladder := []report.Rung{
+		{Word: "structure"}, {Word: "device"}, {Word: "instrument"},
+		{Word: "weapon"}, {Word: "member"}, {Word: "limb"},
+		{Word: "arm"}, // the lemma
+		{Word: "sleeve"}, {Word: "branch"}, {Word: "rest"},
+	}
+	got := demoteOptions(ladder, "arm")
+	want := []string{"instrument", "weapon", "member", "limb"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got %v, want %v", got, want)
+		}
+	}
+	for _, w := range []string{"sleeve", "branch", "rest"} {
+		for _, g := range got {
+			if g == w {
+				t.Errorf("%q is stronger than the lemma and must never be a demotion", w)
+			}
+		}
+	}
+	if len(demoteOptions([]report.Rung{{Word: "journal"}, {Word: "ledger"}}, "journal")) != 0 {
+		t.Error("a lemma that is already the weakest rung has nothing to offer")
+	}
+}
+
+// The wiring: Build must route through demoteOptions, not rebuild the list.
+func TestBuildOffersTheGateExactlyDemoteOptions(t *testing.T) {
+	now := time.Now()
+	rec := &recordingJudge{seen: map[string][]string{}, v: judge.Verdict{Role: judge.RoleTic, DemoteTo: "entity", Note: "loose"}}
+	rep, err := Build(dogTurns(now), loadTestWN(t), testLoader(t), rec, now, Options{
+		RecentDays: 7, BaselineDays: 14,
+		Top: 8, MinCount: 5, MinRatio: 2.0,
+		MaxUses: 50, MinUses: 5,
+		Threshold: 0.97, MinClean: 0.4,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := entry(rep, "dog")
+	if e == nil {
+		t.Fatal("precondition: dog should be in the report")
+	}
+	offered, ok := rec.seen["dog"]
+	if !ok {
+		t.Fatal("precondition: the gate should have been asked about dog")
+	}
+	want := demoteOptions(e.Ladder, "dog")
+	if len(offered) != len(want) {
+		t.Fatalf("offered %v, want %v", offered, want)
+	}
+	for i := range want {
+		if offered[i] != want[i] {
+			t.Fatalf("offered %v, want %v", offered, want)
+		}
+	}
+}

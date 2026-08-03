@@ -93,6 +93,13 @@ func (s *Store) Latest(word string) (Record, bool) {
 		if r.Word != word {
 			continue
 		}
+		// Same condition Judge applies before acting on a cached verdict: a
+		// refused one is not a decision. Without this an audit can report a
+		// word suppressed as a term of art on the strength of a verdict the
+		// gate itself threw away.
+		if !r.WellFormed || !r.Safe {
+			continue
+		}
 		if !found || r.At > best.At {
 			best, found = r, true
 		}

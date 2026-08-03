@@ -58,7 +58,7 @@ func TestSafetyRejectsIncoherent(t *testing.T) {
 		safe bool
 	}{
 		{"tic:layer", true},          // tic names a rung — actionable
-		{"tic:none", false},          // tic with no rung — useless
+		{"tic:none", true},           // no offered rung fits — a real verdict
 		{"term_of_art:none", true},   // keep, no substitute
 		{"term_of_art:layer", false}, // contradiction: a term of art offering a swap
 		{"mixed:none", true},         // mixed may abstain
@@ -97,5 +97,23 @@ func TestPayload(t *testing.T) {
 		if !strings.Contains(p, want) {
 			t.Errorf("payload missing %q:\n%s", want, p)
 		}
+	}
+}
+
+// A tic that names no rung is a verdict, not a failure: the injection shows
+// the ladder and the note regardless, and demote_to drives only the display
+// swap. Rejecting it cost the word its role and its note too, and left it
+// un-gated with nothing saying so — measured on a live report, six of
+// twenty-one entries answered "none" and lost everything.
+func TestSafetyKeepsATicWithNothingToOffer(t *testing.T) {
+	s := Safety()
+	if !s("tic:none") {
+		t.Error("no offered rung fits is a real verdict — awareness without a swap")
+	}
+	if !s("term_of_art:none") {
+		t.Error("term of art with no substitute is the coherent case")
+	}
+	if s("term_of_art:layer") {
+		t.Error("a term of art still may not offer a swap")
 	}
 }

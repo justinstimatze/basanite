@@ -165,6 +165,32 @@ func Candidates(wn *wordnet.DB, lemma string) (cands []string, ic map[string]flo
 	return cands, ic, selfIC
 }
 
+// demoteOptions is what the gate may choose a demotion from: exactly the
+// window the reader is shown, minus the lemma itself.
+//
+// The full ladder spans both directions around the lemma — it is sorted by
+// information content and the lemma sits wherever its own specificity puts
+// it. Offering all of it lets the gate pick a rung *stronger* than the word
+// it is demoting, and rungs the injection never displayed, so the display
+// hook could swap in a word the reader was never offered. Measured on a live
+// report before this: nine of twenty-one demotions fell outside the shown
+// window and two inverted the direction outright (ledger -> journal,
+// group -> set). After: none of sixteen.
+//
+// An empty result is a real answer, not a failure. It means the lemma is
+// already the weakest rung on its own ladder, and judge.Safety treats a tic
+// with nothing to offer as coherent for exactly that reason.
+func demoteOptions(ladder []report.Rung, lemma string) []string {
+	shown := report.TrimLadder(ladder, lemma)
+	out := make([]string, 0, len(shown))
+	for _, r := range shown {
+		if r.Word != lemma {
+			out = append(out, r.Word)
+		}
+	}
+	return out
+}
+
 func containsWord(candidate, lemma string) bool {
 	for _, p := range strings.Fields(candidate) {
 		if p == lemma {
@@ -582,13 +608,7 @@ func Build(turns []corpus.Turn, wn *wordnet.DB, loadVectors VectorLoader, jdg ju
 
 		// The gate: the one judgment the deterministic stack can't make.
 		if jdg != nil {
-			demote := make([]string, 0, len(e.Ladder))
-			for _, r := range e.Ladder {
-				if r.Word != j.lemma {
-					demote = append(demote, r.Word)
-				}
-			}
-			if v, ok := jdg.Judge(j.lemma, demote, j.uses); ok {
+			if v, ok := jdg.Judge(j.lemma, demoteOptions(e.Ladder, j.lemma), j.uses); ok {
 				if v.Role == judge.RoleTermOfArt {
 					continue // precise term of art: no valid substitute — suppress, don't count it
 				}
