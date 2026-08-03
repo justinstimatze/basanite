@@ -46,9 +46,16 @@ func cacheKey(word, ladderHash, model string, schemaVersion int) string {
 
 // Store is the append-only verdict log, indexed for cache lookup. Last write
 // wins per key, so a re-judged word supersedes its stale verdict.
+//
+// It keeps the log as well as the index, because they answer different
+// questions. The index is the cache: one live record per key. The log is the
+// calibration trail, and a word re-judged against the same ladder writes two
+// rows that share a key — the index keeps only the second, so churn is
+// exactly the thing the index cannot see.
 type Store struct {
 	path  string
 	byKey map[string]Record
+	all   []Record
 }
 
 // LoadStore reads the JSONL at path (absent file = empty store).
@@ -70,8 +77,17 @@ func LoadStore(path string) (*Store, error) {
 			continue // a corrupt line never blocks the cache
 		}
 		s.byKey[cacheKey(r.Word, r.LadderHash, r.Model, r.SchemaVersion)] = r
+		s.all = append(s.all, r)
 	}
 	return s, sc.Err()
+}
+
+// Records returns the whole log in file order — every verdict ever written,
+// including the ones the index superseded and the ones the gate refused. This
+// is the calibration view; Lookup and Latest are the cache view. The caller
+// gets a copy so it cannot reorder the log underneath the store.
+func (s *Store) Records() []Record {
+	return append([]Record(nil), s.all...)
 }
 
 // Lookup returns a cached verdict for word+ladder under model at the current
@@ -123,6 +139,7 @@ func (s *Store) Append(r Record) error {
 		return err
 	}
 	s.byKey[cacheKey(r.Word, r.LadderHash, r.Model, r.SchemaVersion)] = r
+	s.all = append(s.all, r)
 	return nil
 }
 

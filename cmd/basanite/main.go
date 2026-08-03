@@ -51,6 +51,7 @@ usage: basanite <command> [flags]
   display         MessageDisplay entry: show the demote rung instead of the tic
   install         register the hooks in ~/.claude/settings.json (-status, -uninstall)
   ledger          flagged tics over time — is a tic's rate falling?
+                  (-swaps: what got replaced on screen; -verdicts: judge churn)
   audit           which curated known-tics entries have ever fired?
   version         print version
 
@@ -982,8 +983,23 @@ func runLedger(args []string) error {
 	fs := flag.NewFlagSet("ledger", flag.ContinueOnError)
 	path := fs.String("ledger", "", "ledger file (default: state dir)")
 	showSwaps := fs.Bool("swaps", false, "instead show what the display hook replaced on screen")
+	showVerdicts := fs.Bool("verdicts", false, "instead show whether the judge gives a word the same answer twice")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *showVerdicts {
+		// A third view for the same reason as -swaps: this counts what the
+		// gate decided, which is neither what was written nor what was read.
+		dir, err := report.StateDir()
+		if err != nil {
+			return err
+		}
+		st, err := judge.LoadStore(filepath.Join(dir, "verdicts.jsonl"))
+		if err != nil {
+			return err
+		}
+		fmt.Print(judge.RenderChurn(st.Records()))
+		return nil
 	}
 	if *showSwaps {
 		// Deliberately a separate view, not another section: this counts what
