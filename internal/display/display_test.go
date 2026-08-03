@@ -47,9 +47,31 @@ func TestApplySwapsProseAndCarriesCase(t *testing.T) {
 	if got, _, _ := s.Apply("SUBSTRATE", State{}); got != "COMPONENT" {
 		t.Errorf("all-caps must survive the swap, got %q", got)
 	}
-	// A word that merely contains a flagged lemma is not that lemma.
-	if got, _, _ := s.Apply("substrates and substrate-like things", State{}); strings.Contains(got, "component") {
+	// A compound that merely contains a flagged lemma is not that lemma.
+	if got, _, _ := s.Apply("substrate-like things", State{}); strings.Contains(got, "component") {
 		t.Errorf("swapped inside a longer word: %q", got)
+	}
+	// A plural is the same word. The table is keyed on lemmas, so matching
+	// the surface form alone skipped every inflected use — "arms", the form
+	// the lean actually takes, never swapped once.
+	if got, _, _ := s.Apply("Both substrates held.", State{}); got != "Both components held." {
+		t.Errorf("a plural must swap and stay plural, got %q", got)
+	}
+}
+
+func TestPluralAgreementFollowsTheReplacement(t *testing.T) {
+	// The rung is a WordNet noun, so the regular rule covers it — but the
+	// replacement's own ending decides the suffix, not the original's.
+	for _, c := range []struct{ lemma, rep, in, want string }{
+		{"arm", "branch", "both arms", "both branches"},            // -ch takes -es
+		{"lane", "path", "two lanes", "two paths"},                 // regular
+		{"surface", "boundary", "the surfaces", "the boundaries"},  // -y takes -ies
+		{"arm", "branch", "the arm's reach", "the branch's reach"}, // possessive, not plural
+	} {
+		got, _, _ := Swaps{c.lemma: c.rep}.Apply(c.in, State{})
+		if got != c.want {
+			t.Errorf("%q -> %q: got %q, want %q", c.lemma, c.rep, got, c.want)
+		}
 	}
 }
 

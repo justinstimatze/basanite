@@ -17,6 +17,7 @@ import (
 	"unicode"
 
 	"github.com/justinstimatze/basanite/internal/report"
+	"github.com/justinstimatze/basanite/internal/text"
 )
 
 // Swaps maps a flagged lemma to the word shown in its place.
@@ -131,19 +132,61 @@ func (s Swaps) applyLine(line string, counts map[string]int) string {
 // the tics that most want swapping are compounds like "load-bearing".
 var wordish = regexp.MustCompile(`[\p{L}][\p{L}'-]*`)
 
-func (s Swaps) swapWords(text string, counts map[string]int) string {
-	if text == "" {
-		return text
+func (s Swaps) swapWords(line string, counts map[string]int) string {
+	if line == "" {
+		return line
 	}
-	return wordish.ReplaceAllStringFunc(text, func(w string) string {
-		lemma := strings.ToLower(w)
+	return wordish.ReplaceAllStringFunc(line, func(w string) string {
+		surface := strings.ToLower(w)
+		if rep, ok := s[surface]; ok {
+			counts[surface]++
+			return matchCase(w, rep)
+		}
+		// The table is keyed on lemmas, because that is what the report
+		// counts: "arms" and "arm" are one word to every other part of this
+		// tool. The screen shows surface forms. Matching only the exact
+		// surface meant the swap fired on the singular and silently passed
+		// over every plural — including "arms", which is the form the lean
+		// actually takes.
+		lemma := text.Lemma(surface)
+		if lemma == surface {
+			return w
+		}
 		rep, ok := s[lemma]
 		if !ok {
 			return w
 		}
 		counts[lemma]++
-		return matchCase(w, rep)
+		return matchCase(w, inflect(surface, lemma, rep))
 	})
+}
+
+// inflect carries the surface form's ending onto the replacement, so swapping
+// a plural does not leave a singular behind ("both arms" -> "both branch").
+// Lemma only ever strips a possessive or a plural, so those are the two cases
+// that can reach here.
+func inflect(surface, lemma, rep string) string {
+	if suf := strings.TrimPrefix(surface, lemma); suf != surface && (suf == "'s" || suf == "'") {
+		return rep + suf
+	}
+	return pluralize(rep)
+}
+
+// pluralize is the regular English rule, applied to the last word of the
+// replacement. A rung is a common noun picked from WordNet, so the regular
+// rule covers it; an irregular would be wrong, and visibly so, which is the
+// failure mode this whole surface prefers.
+func pluralize(w string) string {
+	switch {
+	case w == "":
+		return w
+	case strings.HasSuffix(w, "s"), strings.HasSuffix(w, "x"), strings.HasSuffix(w, "z"),
+		strings.HasSuffix(w, "sh"), strings.HasSuffix(w, "ch"):
+		return w + "es"
+	case len(w) > 1 && strings.HasSuffix(w, "y") && !strings.ContainsRune("aeiou", rune(w[len(w)-2])):
+		return w[:len(w)-1] + "ies"
+	}
+	return w + "s"
 }
 
 // matchCase carries the original's capitalization onto the replacement, so a

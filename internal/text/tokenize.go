@@ -143,6 +143,12 @@ func keep(w string) bool {
 
 // stopwords: function words plus conversational filler that no one needs
 // flagged as a "tic". Content words only past this gate.
+//
+// Number words are here in full. The list used to stop at "three", which read
+// as a reasonable place to stop and was not one: "four" and "five" then passed
+// as content, and they are common enough in prose about files and steps to
+// clear the chronic rate floor. Both reached the judge, which — obliged to
+// pick a rung — returned "four -> whole number" and "five -> figure".
 var stopwords = func() map[string]bool {
 	list := `the a an and or but if then else when while for nor so yet as at by
 	in into of off on onto out over to under up with within without about above
@@ -163,9 +169,12 @@ var stopwords = func() map[string]bool {
 	well right like don doesn didn isn aren wasn weren won wouldn couldn
 	shouldn can't cannot it's that's there's here's what's let's i'm i've i'll
 	you're you've we're we've they're don't doesn't didn't isn't aren't wasn't
-	weren't won't wouldn't couldn't shouldn't one two three first second third
+	weren't won't wouldn't couldn't shouldn't
 	new old good bad big small long short high low out-of because actually
-	really quite rather pretty bit lot lots kind sort part back next last off`
+	really quite rather pretty bit lot lots kind sort part back next last off
+	one two three four five six seven eight nine ten eleven twelve twenty
+	thirty forty fifty hundred thousand million
+	first second third fourth fifth sixth seventh eighth ninth tenth`
 	m := make(map[string]bool)
 	for _, w := range strings.Fields(list) {
 		m[Lemma(w)] = true

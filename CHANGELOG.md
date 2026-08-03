@@ -48,6 +48,21 @@ ago.
   failing, which is the right graceful default everywhere except here. An audit
   that reports on a list it never opened is the exact failure it exists to
   catch, so the source is now explicit and printed.
+- **Number words are stopwords past three.** The list ran `one two three` and
+  stopped, which reads as a reasonable place to stop and is not one. `four` and
+  `five` went through as content words, and prose about files and steps says
+  them often enough to clear the chronic rate floor. Both reached the judge,
+  which is obliged to pick a rung from the ladder it is handed and returned
+  `four -> whole number` and `five -> figure`. The second was live in the
+  report.
+- **The display hook swaps plurals.** The swap table is keyed on lemmas —
+  `arms` and `arm` are one word to every other part of this tool — but the
+  screen shows surface forms, and the swap matched only the exact surface. So
+  it fired on the singular and passed silently over every inflected use. The
+  word that surfaced this was `arm`, whose lean is almost entirely "both arms"
+  and "the other arm"; the one form that would have swapped is the one that
+  rarely appears. Replacements now take the original's ending, with the
+  replacement's own spelling deciding the suffix (`arms` -> `branches`).
 
 ## v0.6.0 (2026-08-02) — not having to read it
 
