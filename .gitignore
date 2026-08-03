@@ -8,3 +8,4 @@
 # local dev bridge to sibling modules — never commit
 go.work
 go.work.sum
+.plancheck-debug.json

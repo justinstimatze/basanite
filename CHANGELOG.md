@@ -1,5 +1,66 @@
 # Changelog
 
+## v0.8.0 (2026-08-03) — shown, and where the rung came from
+
+The injection displays four rungs below the word it flags. The judge that
+picks the replacement was handed the whole ladder, which runs in both
+directions around the lemma — so the swap could name a rung stronger than the
+word it was demoting, or one the reader was never shown. Nine of twenty-one
+demotions on a live report sat outside that window and two inverted outright.
+`substrate → component` had been swapping on screen for weeks, and `component`
+appears nowhere in the four rungs the injection prints.
+
+The rest of the release is the previous one's question asked of a different
+surface. `audit` exists because a curated entry that never fires looks exactly
+like one that fires constantly. The same blind spot had two more instances:
+nobody counted what reached a prompt, and nobody counted whether the judge
+gives a word the same answer twice.
+
+- **The judge is offered exactly the window the reader sees.** Zero of sixteen
+  demotions now fall outside it, down from nine of twenty-one.
+- **A word can be a tic with nothing to offer.** Trimming alone made `arm`
+  worse, not better: its whole window is the limb sense — `instrument <
+  weapon < member < limb` — so a judge forced to choose returns `arm → limb`.
+  Declining is now a verdict rather than a rejection, and the instructions say
+  so. Six words take it, and the note explains why in each case; `arm` reads
+  "neither a tool, a weapon, a body part, nor a group member." A wrong-sense
+  ladder produces awareness without a swap instead of a confident bad rung.
+- **A refusal is no longer permanent.** The verdict record is written before
+  the safety check, and any cached record was served back — so a word that
+  once failed the fence failed it forever for that ladder, silently,
+  recoverable only by bumping the schema. Six words were stuck behind their
+  own refusals. The gate now asks again: one extra call per report run, only
+  for words that actually failed. `audit` got the same condition, since it
+  could report a word suppressed as a term of art on a verdict the gate itself
+  threw away.
+- **`basanite ledger -verdicts`** reports whether the gate answers the same way
+  twice. The cache is keyed on the ladder and the ladder moves when
+  tokenization does, so words get re-judged for reasons unrelated to how they
+  are used. It counts flips under an unchanged prompt separately from flips
+  that only straddle a schema bump — the second kind is the tool's own history
+  and folding it in would have made the number mostly noise. Twenty-four of
+  fifty-three multi-ladder words changed their answer with the prompt held
+  still; ten crossed the term-of-art boundary, which decides whether the word
+  appears at all.
+- **The ledger counts what reached a prompt.** `Refreshes` counts report
+  membership, and the injection takes three chronic entries and two risers of
+  a much longer report — so a word can sit in every report for months and
+  never be shown. Twenty-six of twenty-six still-flagged words had never
+  reached a prompt and no surface said so.
+- **Curated entries starve the detected ones, on purpose.** Curated-first is a
+  total order rather than a tiebreak and the chronic share is three, so three
+  curated words take every chronic slot. `running` at 1.82/1k and `confirmed`
+  at 1.78 had been in every report for seven refreshes without ever being
+  shown. A rotation rule was designed for this and dropped: the curated bucket
+  held exactly as many words as there were slots, so retiring a word had
+  nowhere to retire it to. The ranking is the design — a standing instruction
+  should outrank a suggestion — and what was wrong was that losing was
+  indistinguishable from being unreachable. The ledger now marks rows
+  `curated, shown 4×` or `never shown` and follows the tally with the steadiest
+  uncurated candidates, so the list is the control surface. DESIGN.md records
+  the decision, and when the list outgrows three slots the rotation rule
+  becomes worth revisiting.
+
 ## v0.7.0 (2026-08-03) — the quiet no-ops
 
 A curated list cannot answer the question that decides whether it is worth
