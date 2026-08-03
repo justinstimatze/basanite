@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — which entries have ever fired?
+## v0.7.0 (2026-08-03) — the quiet no-ops
 
 A curated list cannot answer the question that decides whether it is worth
 curating. An entry that never matches looks, from the list's own point of
@@ -9,6 +9,12 @@ overuse never reaches a report, "the ranking is working as designed" and "the
 pattern is broken" are indistinguishable from outside — which is the shape of
 the `load-bearing` complaint that turned out to be a budget bug two releases
 ago.
+
+Asking that question found more of the same shape than it went looking for. A
+number word passing as content and getting a demote rung. A display swap that
+fired on the singular and skipped every plural. A staleness check that only
+ran at a moment when nothing was ever stale. In each case the thing was not
+happening and no surface said so, which is the same reason the audit exists.
 
 - **`basanite audit`** counts every curated entry against the corpus and buckets
   it: reported (with its rank), suppressed by the judge as a term of art,
