@@ -199,3 +199,79 @@ func TestSpawnRefreshBacksOffOnRecentAttempt(t *testing.T) {
 		t.Error("no log at all means nothing has been tried yet")
 	}
 }
+
+// A compaction erases the injected block outright, so the marker's clock is
+// measuring the wrong thing from that moment. Clearing it lets the existing
+// UserPromptSubmit path re-inject on the next prompt instead of waiting out
+// the remainder of a four-hour interval that started before the wipe.
+func TestCompactedSessionClearsTheMarker(t *testing.T) {
+	for name, tc := range map[string]struct {
+		payload string
+		want    string
+	}{
+		"compact":       {`{"session_id":"sess-1","source":"compact"}`, "sess-1"},
+		"startup":       {`{"session_id":"sess-1","source":"startup"}`, ""},
+		"resume":        {`{"session_id":"sess-1","source":"resume"}`, ""},
+		"no source":     {`{"session_id":"sess-1"}`, ""},
+		"bad id":        {`{"session_id":"../evil","source":"compact"}`, ""},
+		"empty id":      {`{"source":"compact"}`, ""},
+		"garbage":       {`not json`, ""},
+		"empty payload": {``, ""},
+	} {
+		f := filepath.Join(t.TempDir(), "stdin")
+		if err := os.WriteFile(f, []byte(tc.payload), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		fh, err := os.Open(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := compactedSession(fh)
+		fh.Close()
+		if got != tc.want {
+			t.Errorf("%s: compactedSession = %q, want %q", name, got, tc.want)
+		}
+	}
+}
+
+// `refresh` is a SessionStart hook AND a command someone types. Reading stdin
+// unconditionally would hang it at a terminal, waiting for JSON nobody types.
+func TestCompactedSessionIgnoresATerminal(t *testing.T) {
+	tty, err := os.Open("/dev/tty")
+	if err != nil {
+		t.Skip("no controlling terminal in this environment")
+	}
+	defer tty.Close()
+	if got := compactedSession(tty); got != "" {
+		t.Errorf("compactedSession(tty) = %q, want empty", got)
+	}
+}
+
+func TestRunWritecheckNeverFails(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	for _, args := range [][]string{
+		{"-bogus-flag"}, {"-max-age", "7d"}, {"-report", "/nonexistent/r.json"}, {},
+	} {
+		if err := runWritecheck(args); err != nil {
+			t.Errorf("runWritecheck(%v) = %v, want nil", args, err)
+		}
+	}
+}
+
+// Once per word per session: the curated list carries short entries that
+// collide with ordinary identifiers, so a wrong match must cost one line.
+func TestSeenWordsRoundTrip(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "written-sess")
+	if got := loadSeenWords(p); len(got) != 0 {
+		t.Fatalf("absent file should read empty, got %v", got)
+	}
+	saveSeenWords(p, map[string]bool{}, []string{"substrate", "texture"})
+	seen := loadSeenWords(p)
+	if !seen["substrate"] || !seen["texture"] || len(seen) != 2 {
+		t.Fatalf("round-trip lost words: %v", seen)
+	}
+	saveSeenWords(p, seen, []string{"calibration"})
+	if seen = loadSeenWords(p); len(seen) != 3 || !seen["calibration"] {
+		t.Errorf("append lost prior words: %v", seen)
+	}
+}

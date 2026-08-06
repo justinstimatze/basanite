@@ -16,10 +16,11 @@ import (
 
 // Hook is one registration: a subcommand, the event it runs on, and why.
 type Hook struct {
-	Event string
-	Sub   string
-	Async bool
-	Why   string
+	Event   string
+	Sub     string
+	Matcher string // tool pattern; only PreToolUse needs one
+	Async   bool
+	Why     string
 }
 
 // Hooks is the full turn-start loop. Order is the order they run in a session.
@@ -30,6 +31,8 @@ var Hooks = []Hook{
 		Why: "inject tic awareness at turn start"},
 	{Event: "MessageDisplay", Sub: "display",
 		Why: "show the demote rung instead of the tic"},
+	{Event: "PreToolUse", Sub: "writecheck", Matcher: "Write|Edit",
+		Why: "name tics going into a file, where display never sees them"},
 }
 
 // Change describes one hook's outcome, for the report to the user.
@@ -80,7 +83,7 @@ func (s *Settings) Apply(bin string) []Change {
 	for _, h := range Hooks {
 		want := bin + " " + h.Sub
 		groups, _ := hooks[h.Event].([]any)
-		if found, was := retarget(groups, h.Sub, want); found {
+		if found, was := retarget(groups, h.Sub, want, h.Matcher); found {
 			action := "updated"
 			if was == want {
 				action = "unchanged"
@@ -93,7 +96,7 @@ func (s *Settings) Apply(bin string) []Change {
 			entry["async"] = true
 		}
 		hooks[h.Event] = append(groups, map[string]any{
-			"matcher": "",
+			"matcher": h.Matcher,
 			"hooks":   []any{entry},
 		})
 		changes = append(changes, Change{Hook: h, Action: "added"})
@@ -104,7 +107,9 @@ func (s *Settings) Apply(bin string) []Change {
 // retarget points an existing basanite registration for sub at want, in place.
 // It matches on the subcommand rather than the full path precisely so that a
 // hook left over from an older install location is repaired, not duplicated.
-func retarget(groups []any, sub, want string) (found bool, was string) {
+// The matcher is rewritten too: a registration carrying the wrong tool pattern
+// never fires, and it looks identical to a correct one in the settings file.
+func retarget(groups []any, sub, want, matcher string) (found bool, was string) {
 	for _, g := range groups {
 		gm, _ := g.(map[string]any)
 		inner, _ := gm["hooks"].([]any)
@@ -115,6 +120,9 @@ func retarget(groups []any, sub, want string) (found bool, was string) {
 				continue
 			}
 			em["command"] = want
+			if existing, _ := gm["matcher"].(string); existing != matcher && len(inner) == 1 {
+				gm["matcher"] = matcher
+			}
 			return true, cmd
 		}
 	}

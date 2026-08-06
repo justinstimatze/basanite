@@ -1,5 +1,35 @@
 # Changelog
 
+## Unreleased — the surface nothing was watching
+
+All three registered hooks were input-side or screen-side. `display` swaps a
+tic for its rung on `MessageDisplay`, and text going into a file through a
+Write or Edit never streams to the terminal that way — so a flagged word could
+go into any number of files while every entry point reported the tool working.
+Measured on 2026-08-06: five instances of `load-bearing` across four files in
+one stretch of work, with the word at `known-tics.txt:28` and its ladder in the
+live report the whole time.
+
+- **New `PreToolUse` hook on `Write|Edit`: `basanite writecheck`.** Counts the
+  swap table against the incoming content and names each hit with its demote
+  rung. Reuses `display.Swaps.Apply` for the counting, so fenced blocks,
+  protected spans and inflected forms behave identically to the screen path;
+  the rewritten text is discarded. Advisory only, silent on every abnormal
+  path. Each word is named once per session — the curated list carries short
+  entries like `arm` that collide with ordinary identifiers, so a wrong match
+  costs one line and then nothing. Across 42 basanite source files in one
+  session: 2 injections. Across 17 lexicon atoms: 2.
+- **`refresh` clears the injection marker on `source: "compact"`.** The
+  re-injection interval is a wall clock, and a compaction erases the injected
+  block outright — so the clock was measuring the wrong thing from that moment.
+  On the session above the marker was 1h36m old when the compact landed,
+  leaving a 2h24m window with no awareness in context, which is exactly where
+  the five instances went. `refresh` is also a command someone types, so the
+  stdin read is guarded on the terminal check; an unconditional read would hang
+  it at a prompt.
+- `install.Hook` gains a `Matcher`, and `retarget` now repairs a wrong matcher
+  on an existing registration instead of leaving a hook that never fires.
+
 ## v0.8.0 (2026-08-03) — shown, and where the rung came from
 
 The injection displays four rungs below the word it flags. The judge that

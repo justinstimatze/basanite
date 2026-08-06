@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime/debug"
+	"sort"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -49,6 +50,7 @@ usage: basanite <command> [flags]
   refresh         regenerate the state file if stale (runs from both hooks)
   hook            UserPromptSubmit entry: inject the report
   display         MessageDisplay entry: show the demote rung instead of the tic
+  writecheck      PreToolUse entry: name tics in text about to enter a file
   install         register the hooks in ~/.claude/settings.json (-status, -uninstall)
   ledger          flagged tics over time — is a tic's rate falling?
                   (-swaps: what got replaced on screen; -verdicts: judge churn)
@@ -86,6 +88,8 @@ func main() {
 		err = runAudit(args)
 	case "install":
 		err = runInstall(args)
+	case "writecheck":
+		err = runWritecheck(os.Args[2:])
 	case "display":
 		err = runDisplay(args)
 	case "ledger":
@@ -608,6 +612,31 @@ func staleReason(rep *report.Report, maxAge time.Duration) string {
 // cannot express "tried and could not". refresh.log is written on success and
 // failure alike, so its mtime is the attempt clock. Only this path backs off:
 // `basanite refresh` run by hand still runs.
+// compactedSession returns the session id when this refresh was triggered by
+// a compaction, and "" otherwise.
+//
+// `refresh` is both the SessionStart hook and a command someone types, so the
+// terminal check is not defensive tidiness: an unconditional read would hang
+// `basanite refresh` at a prompt, waiting for JSON nobody is going to type.
+// spawnRefresh passes a nil Stdin, which is /dev/null, so the decode there
+// ends at EOF with Source empty.
+func compactedSession(stdin *os.File) string {
+	if fi, err := stdin.Stat(); err != nil || fi.Mode()&os.ModeCharDevice != 0 {
+		return ""
+	}
+	var in struct {
+		SessionID string `json:"session_id"`
+		Source    string `json:"source"`
+	}
+	if json.NewDecoder(stdin).Decode(&in) != nil {
+		return ""
+	}
+	if in.Source != "compact" || !validSessionID(in.SessionID) {
+		return ""
+	}
+	return in.SessionID
+}
+
 func spawnRefresh(stateDir string) {
 	if refreshBackedOff(stateDir) {
 		return
@@ -665,6 +694,20 @@ func runRefresh(args []string) error {
 	)
 	if fs.Parse(args) != nil {
 		return nil
+	}
+
+	// SessionStart carries why it fired. A compaction erases the turn-start
+	// block outright, so the marker's clock is measuring the wrong thing from
+	// that moment on and the next injection is due whenever it happens to be
+	// due. Measured on 2026-08-06: the marker was 1h36m old when the compact
+	// landed, leaving a 2h24m window with no awareness in context, and
+	// "load-bearing" went into four files inside it while sitting at
+	// known-tics.txt:28 the whole time. Clearing the marker here lets the
+	// existing UserPromptSubmit path re-inject on the very next prompt.
+	if sid := compactedSession(os.Stdin); sid != "" {
+		if dir, err := report.StateDir(); err == nil {
+			os.Remove(filepath.Join(dir, "injected-"+sid))
+		}
 	}
 
 	path, err := report.Path()
@@ -918,6 +961,136 @@ func runDisplay(args []string) error {
 	resp.HookSpecificOutput.DisplayContent = out
 	json.NewEncoder(os.Stdout).Encode(&resp)
 	return nil
+}
+
+// runWritecheck is the PreToolUse hook on Write|Edit: it names the tics in
+// text about to enter a file, with the rung to demote to.
+//
+// This is the surface the other three miss. `display` swaps on MessageDisplay,
+// and content going into a file through a tool call never streams to the
+// terminal that way, so a word can go into twenty files while every other
+// entry point reports the tool working. Measured on 2026-08-06: five instances
+// of "load-bearing" across four files in one stretch of work, with the word
+// sitting at known-tics.txt:28 and its ladder in the report the whole time.
+//
+// Advisory only, and silent on every abnormal path — a hook standing in front
+// of every write has no business failing loudly.
+func runWritecheck(args []string) error {
+	fs := flag.NewFlagSet("writecheck", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	var (
+		path   = fs.String("report", "", "report path (default: state dir)")
+		all    = fs.Bool("all", false, "flag every judged entry, not just curated known-tics")
+		min    = fs.Int("min", 1, "minimum occurrences in one write before flagging")
+		maxAge = fs.Duration("max-age", 7*24*time.Hour, "ignore reports older than this")
+	)
+	if fs.Parse(args) != nil {
+		return nil
+	}
+
+	var in struct {
+		SessionID string `json:"session_id"`
+		ToolInput struct {
+			FilePath  string `json:"file_path"`
+			Content   string `json:"content"`
+			NewString string `json:"new_string"`
+		} `json:"tool_input"`
+	}
+	if json.NewDecoder(os.Stdin).Decode(&in) != nil || !validSessionID(in.SessionID) {
+		return nil
+	}
+	text := in.ToolInput.Content
+	if text == "" {
+		text = in.ToolInput.NewString
+	}
+	if text == "" {
+		return nil
+	}
+
+	if *path == "" {
+		p, err := report.Path()
+		if err != nil {
+			return nil
+		}
+		*path = p
+	}
+	rep, err := report.Load(*path)
+	if err != nil || rep == nil || time.Since(rep.GeneratedAt) > *maxAge {
+		return nil
+	}
+	swaps := display.FromReport(rep, *all)
+	if len(swaps) == 0 {
+		return nil
+	}
+
+	// Apply does the counting: it already skips fenced blocks and protected
+	// spans, and already matches inflected forms against the lemma table. The
+	// rewritten text is thrown away — nothing here edits what gets written.
+	_, _, counts := swaps.Apply(text, display.State{})
+	dir, err := report.StateDir()
+	if err != nil {
+		return nil
+	}
+
+	// Once per word per session. The curated list carries short entries like
+	// "arm" that collide with ordinary identifiers, so the cost of a wrong
+	// match has to be one line and then nothing.
+	seenPath := filepath.Join(dir, "written-"+in.SessionID)
+	seen := loadSeenWords(seenPath)
+	fresh := make([]string, 0, len(counts))
+	for w, n := range counts {
+		if n >= *min && !seen[w] {
+			fresh = append(fresh, w)
+		}
+	}
+	if len(fresh) == 0 {
+		return nil
+	}
+	sort.Slice(fresh, func(i, j int) bool { return counts[fresh[i]] > counts[fresh[j]] })
+	saveSeenWords(seenPath, seen, fresh)
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "basanite — words you lean on, in the text about to be written to %s",
+		filepath.Base(in.ToolInput.FilePath))
+	b.WriteString(" (awareness, not prohibition; each named once per session):\n")
+	for _, w := range fresh {
+		fmt.Fprintf(&b, "  %s ×%d → %s\n", w, counts[w], swaps[w])
+	}
+
+	var resp struct {
+		HookSpecificOutput struct {
+			HookEventName     string `json:"hookEventName"`
+			AdditionalContext string `json:"additionalContext"`
+		} `json:"hookSpecificOutput"`
+	}
+	resp.HookSpecificOutput.HookEventName = "PreToolUse"
+	resp.HookSpecificOutput.AdditionalContext = b.String()
+	json.NewEncoder(os.Stdout).Encode(&resp)
+	return nil
+}
+
+func loadSeenWords(path string) map[string]bool {
+	seen := map[string]bool{}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return seen
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			seen[line] = true
+		}
+	}
+	return seen
+}
+
+func saveSeenWords(path string, seen map[string]bool, add []string) {
+	words := make([]string, 0, len(seen)+len(add))
+	for w := range seen {
+		words = append(words, w)
+	}
+	words = append(words, add...)
+	sort.Strings(words)
+	os.WriteFile(path, []byte(strings.Join(words, "\n")+"\n"), 0o600)
 }
 
 // displayStatePrefix names the per-session fence state carried between the

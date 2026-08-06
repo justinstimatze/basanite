@@ -27,6 +27,7 @@ basanite report          # full pipeline (scan→vet→ladder) → state file, ~
 basanite refresh         # regenerate the state file if stale (runs from both hooks)
 basanite hook            # UserPromptSubmit entry: inject the report, ~4 ms
 basanite display         # MessageDisplay entry: show the demote rung instead of the tic
+basanite writecheck      # PreToolUse entry: name tics in text about to enter a file
 basanite ledger          # flagged tics over time — is a tic's rate falling, and did it ever reach a prompt?
                          #   -swaps: what the display hook replaced; -verdicts: does the judge answer the same twice?
 basanite audit           # which curated known-tics entries have ever fired?
@@ -62,13 +63,14 @@ Pass the fetch script a real path (as above) rather than letting it default
 to `./data` — the default only works when you run basanite from the
 checkout, since `./data` is resolved against the current directory.
 
-The three hooks `install` registers, and what each is for:
+The four hooks `install` registers, and what each is for:
 
 | event | command | why |
 | --- | --- | --- |
-| `SessionStart` | `basanite refresh` | regenerate the report when it goes stale. Exits instantly when it's fresh, regenerates in the background when not (`async`, so it never delays the session), single-flights via a lock file, and logs each attempt to `refresh.log` in the state dir. |
+| `SessionStart` | `basanite refresh` | regenerate the report when it goes stale. Exits instantly when it's fresh, regenerates in the background when not (`async`, so it never delays the session), single-flights via a lock file, and logs each attempt to `refresh.log` in the state dir. Also clears the session's injection marker when it fires with `source: "compact"`, so awareness comes back on the next prompt instead of waiting out an interval that started before the wipe. |
 | `UserPromptSubmit` | `basanite hook` | inject tic awareness at turn start, ~4 ms. Also checks staleness and starts a detached `refresh` when needed — `SessionStart` fires once per session, and a session can run for weeks. |
 | `MessageDisplay` | `basanite display` | render the demote rung instead of the tic, ~4 ms. See [below](#not-having-to-read-it-display) — this one is optional and changes only what you read. |
+| `PreToolUse` (`Write\|Edit`) | `basanite writecheck` | name the tics in text about to enter a file, with the rung to demote to. The other three are all input-side or screen-side: a word written through a tool call never streams to the terminal, so `display` cannot see it and nothing else notices. Each word is named once per session, because the curated list carries short entries that collide with ordinary identifiers and a wrong match has to cost one line. |
 
 A report is stale once it is older than six days, or once it was built by a
 different version of basanite, or once you have edited the known-tics list
