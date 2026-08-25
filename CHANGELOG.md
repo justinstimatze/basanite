@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — the surface nothing was watching
+## v0.9.0 (2026-08-24) — the surface nothing was watching
 
 All three registered hooks were input-side or screen-side. `display` swaps a
 tic for its rung on `MessageDisplay`, and text going into a file through a
