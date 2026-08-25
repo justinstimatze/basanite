@@ -258,6 +258,42 @@ func TestRunWritecheckNeverFails(t *testing.T) {
 	}
 }
 
+// Write/Edit send file_path+content/new_string; mcp__linear__save_comment sends body,
+// mcp__linear__save_issue sends description on a full-content update. Content and new_string
+// take precedence so a Write/Edit call is never reinterpreted through Linear's fields.
+func TestExtractWritecheckText(t *testing.T) {
+	build := func(filePath, content, newString, body, description string) writecheckInput {
+		var in writecheckInput
+		in.ToolInput.FilePath = filePath
+		in.ToolInput.Content = content
+		in.ToolInput.NewString = newString
+		in.ToolInput.Body = body
+		in.ToolInput.Description = description
+		return in
+	}
+	for _, tc := range []struct {
+		name      string
+		in        writecheckInput
+		wantText  string
+		wantLabel string
+	}{
+		{"write", build("/a/app.go", "package main", "", "", ""), "package main", "app.go"},
+		{"edit", build("/a/app.go", "", "func f() {}", "", ""), "func f() {}", "app.go"},
+		{"linear comment", build("", "", "", "this is load-bearing", ""), "this is load-bearing", "Linear"},
+		{"linear issue description", build("", "", "", "", "full ticket body"), "full ticket body", "Linear"},
+		{"content wins over body when both present", build("/a/app.go", "file wins", "", "comment loses", ""), "file wins", "app.go"},
+		{"empty", build("", "", "", "", ""), "", "Linear"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			gotText, gotLabel := extractWritecheckText(tc.in)
+			if gotText != tc.wantText || gotLabel != tc.wantLabel {
+				t.Errorf("extractWritecheckText(%+v) = (%q, %q), want (%q, %q)",
+					tc.in, gotText, gotLabel, tc.wantText, tc.wantLabel)
+			}
+		})
+	}
+}
+
 // Once per word per session: the curated list carries short entries that
 // collide with ordinary identifiers, so a wrong match must cost one line.
 func TestSeenWordsRoundTrip(t *testing.T) {

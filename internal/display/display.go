@@ -58,6 +58,39 @@ func FromReport(rep *report.Report, all bool) Swaps {
 	return s
 }
 
+// FromReportForDetection builds writecheck's detection table: every curated
+// entry that counts as a lean, keyed to its judged replacement — empty when
+// the judge named "none". FromReport drops the empty case because a live
+// text swap needs a target to substitute in; writecheck only needs to know
+// the word showed up, and "known tic, no clean substitute" is the case most
+// worth catching before the text ships (judge.go's Safety: an unmatched
+// replacement is a coherent, kept verdict, not a rejected one — a ladder
+// built from every dictionary sense of a word often carries no rung from
+// the sense the writer actually uses).
+//
+// Unsafe to hand to anything that performs the real substitution: Apply's
+// rewritten text would silently blank an empty-replacement word. writecheck
+// is the only caller, and it discards that rewrite, reading only the counts.
+func FromReportForDetection(rep *report.Report, all bool) Swaps {
+	s := Swaps{}
+	if rep == nil {
+		return s
+	}
+	for _, e := range rep.Entries {
+		if e.Kind == "phrase" || e.Lemma == "" {
+			continue
+		}
+		if !all && !e.Known {
+			continue
+		}
+		if e.DemoteTo != "" && strings.EqualFold(e.DemoteTo, e.Lemma) {
+			continue
+		}
+		s[strings.ToLower(e.Lemma)] = e.DemoteTo
+	}
+	return s
+}
+
 // Add merges explicit word:replacement pairs, which win over the report. This
 // is the escape hatch for a lean basanite cannot see (it only reads assistant
 // prose) and for overriding a rung you disagree with.

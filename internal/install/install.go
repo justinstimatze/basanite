@@ -31,8 +31,8 @@ var Hooks = []Hook{
 		Why: "inject tic awareness at turn start"},
 	{Event: "MessageDisplay", Sub: "display",
 		Why: "show the demote rung instead of the tic"},
-	{Event: "PreToolUse", Sub: "writecheck", Matcher: "Write|Edit",
-		Why: "name tics going into a file, where display never sees them"},
+	{Event: "PreToolUse", Sub: "writecheck", Matcher: "Write|Edit|mcp__linear__save_issue|mcp__linear__save_comment|mcp__linear__save_project|mcp__linear__save_document|mcp__linear__save_status_update",
+		Why: "name tics going into a file or a Linear ticket, document, or status update, where display never sees them"},
 }
 
 // Change describes one hook's outcome, for the report to the user.
@@ -83,9 +83,9 @@ func (s *Settings) Apply(bin string) []Change {
 	for _, h := range Hooks {
 		want := bin + " " + h.Sub
 		groups, _ := hooks[h.Event].([]any)
-		if found, was := retarget(groups, h.Sub, want, h.Matcher); found {
+		if found, was, matcherChanged := retarget(groups, h.Sub, want, h.Matcher); found {
 			action := "updated"
-			if was == want {
+			if was == want && !matcherChanged {
 				action = "unchanged"
 			}
 			changes = append(changes, Change{Hook: h, Action: action, Was: was})
@@ -109,7 +109,7 @@ func (s *Settings) Apply(bin string) []Change {
 // hook left over from an older install location is repaired, not duplicated.
 // The matcher is rewritten too: a registration carrying the wrong tool pattern
 // never fires, and it looks identical to a correct one in the settings file.
-func retarget(groups []any, sub, want, matcher string) (found bool, was string) {
+func retarget(groups []any, sub, want, matcher string) (found bool, was string, matcherChanged bool) {
 	for _, g := range groups {
 		gm, _ := g.(map[string]any)
 		inner, _ := gm["hooks"].([]any)
@@ -122,11 +122,12 @@ func retarget(groups []any, sub, want, matcher string) (found bool, was string) 
 			em["command"] = want
 			if existing, _ := gm["matcher"].(string); existing != matcher && len(inner) == 1 {
 				gm["matcher"] = matcher
+				matcherChanged = true
 			}
-			return true, cmd
+			return true, cmd, matcherChanged
 		}
 	}
-	return false, ""
+	return false, "", false
 }
 
 // isBasaniteSub reports whether cmd invokes `basanite <sub>`, at any path.

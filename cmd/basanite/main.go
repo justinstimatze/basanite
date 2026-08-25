@@ -963,18 +963,58 @@ func runDisplay(args []string) error {
 	return nil
 }
 
-// runWritecheck is the PreToolUse hook on Write|Edit: it names the tics in
-// text about to enter a file, with the rung to demote to.
+// runWritecheck is the PreToolUse hook on Write|Edit and Linear's
+// save_issue/save_comment/save_project/save_document/save_status_update: it
+// names the tics in text about to enter a file or get published somewhere
+// with no screen in between, with the rung to demote to.
 //
 // This is the surface the other three miss. `display` swaps on MessageDisplay,
-// and content going into a file through a tool call never streams to the
-// terminal that way, so a word can go into twenty files while every other
-// entry point reports the tool working. Measured on 2026-08-06: five instances
-// of "load-bearing" across four files in one stretch of work, with the word
-// sitting at known-tics.txt:28 and its ladder in the report the whole time.
+// and content going into a file — or into a Linear ticket, document, or status
+// update — through a tool call never streams to the terminal that way, so a
+// word can go into twenty files while every other entry point reports the
+// tool working. Measured on 2026-08-06: five instances of "load-bearing"
+// across four files in one stretch of work, with the word sitting at
+// known-tics.txt:28 and its ladder in the report the whole time.
 //
 // Advisory only, and silent on every abnormal path — a hook standing in front
 // of every write has no business failing loudly.
+type writecheckInput struct {
+	SessionID string `json:"session_id"`
+	ToolInput struct {
+		FilePath    string `json:"file_path"`
+		Content     string `json:"content"`
+		NewString   string `json:"new_string"`
+		Body        string `json:"body"`
+		Description string `json:"description"`
+	} `json:"tool_input"`
+}
+
+// extractWritecheckText picks the prose a PreToolUse call is about to publish, and a label for
+// where it's headed. Write/Edit send file_path+content/new_string; Linear's save_comment and
+// save_status_update send body, save_project and save_document send description/content on a
+// full-content update, same as save_issue. A patch-based edit (save_issue, save_project,
+// save_document all support one) isn't covered — pulling prose out of a patch op list isn't
+// worth it for a first pass, and the existing per-session dedup means a patch-heavy thread still
+// gets checked on its next full-content write.
+func extractWritecheckText(in writecheckInput) (text, label string) {
+	switch {
+	case in.ToolInput.Content != "":
+		text = in.ToolInput.Content
+	case in.ToolInput.NewString != "":
+		text = in.ToolInput.NewString
+	case in.ToolInput.Body != "":
+		text = in.ToolInput.Body
+	case in.ToolInput.Description != "":
+		text = in.ToolInput.Description
+	}
+	if in.ToolInput.FilePath != "" {
+		label = filepath.Base(in.ToolInput.FilePath)
+	} else {
+		label = "Linear"
+	}
+	return text, label
+}
+
 func runWritecheck(args []string) error {
 	fs := flag.NewFlagSet("writecheck", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -988,21 +1028,11 @@ func runWritecheck(args []string) error {
 		return nil
 	}
 
-	var in struct {
-		SessionID string `json:"session_id"`
-		ToolInput struct {
-			FilePath  string `json:"file_path"`
-			Content   string `json:"content"`
-			NewString string `json:"new_string"`
-		} `json:"tool_input"`
-	}
+	var in writecheckInput
 	if json.NewDecoder(os.Stdin).Decode(&in) != nil || !validSessionID(in.SessionID) {
 		return nil
 	}
-	text := in.ToolInput.Content
-	if text == "" {
-		text = in.ToolInput.NewString
-	}
+	text, label := extractWritecheckText(in)
 	if text == "" {
 		return nil
 	}
@@ -1018,7 +1048,7 @@ func runWritecheck(args []string) error {
 	if err != nil || rep == nil || time.Since(rep.GeneratedAt) > *maxAge {
 		return nil
 	}
-	swaps := display.FromReport(rep, *all)
+	swaps := display.FromReportForDetection(rep, *all)
 	if len(swaps) == 0 {
 		return nil
 	}
@@ -1050,11 +1080,14 @@ func runWritecheck(args []string) error {
 	saveSeenWords(seenPath, seen, fresh)
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "basanite — words you lean on, in the text about to be written to %s",
-		filepath.Base(in.ToolInput.FilePath))
+	fmt.Fprintf(&b, "basanite — words you lean on, in the text about to be written to %s", label)
 	b.WriteString(" (awareness, not prohibition; each named once per session):\n")
 	for _, w := range fresh {
-		fmt.Fprintf(&b, "  %s ×%d → %s\n", w, counts[w], swaps[w])
+		if rep := swaps[w]; rep != "" {
+			fmt.Fprintf(&b, "  %s ×%d → %s\n", w, counts[w], rep)
+		} else {
+			fmt.Fprintf(&b, "  %s ×%d (no clean substitute)\n", w, counts[w])
+		}
 	}
 
 	var resp struct {

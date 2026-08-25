@@ -38,6 +38,37 @@ func TestFromReportDefaultsToCuratedEntries(t *testing.T) {
 	}
 }
 
+// A known tic the judge could not match to any ladder rung ("arm": known,
+// no demote_to) is exactly the case FromReport must drop — there is no
+// target to swap in — and exactly the case writecheck must still flag, since
+// there is no live-display substitute masking it either.
+func TestFromReportForDetectionKeepsWordsWithNoSubstitute(t *testing.T) {
+	rep := &report.Report{Entries: []report.Entry{
+		{Kind: "chronic", Lemma: "load-bearing", DemoteTo: "supporting", Known: true},
+		{Kind: "chronic", Lemma: "arm", Known: true}, // known tic, no rung fit
+		{Kind: "riser", Lemma: "five", DemoteTo: "figure"},
+		{Kind: "phrase", Lemma: "worth noting", DemoteTo: "x"},
+	}}
+	s := FromReportForDetection(rep, false)
+	if got, ok := s["arm"]; !ok || got != "" {
+		t.Errorf(`FromReportForDetection(false)["arm"] = (%q, %v), want ("", true)`, got, ok)
+	}
+	if s["load-bearing"] != "supporting" {
+		t.Errorf("curated entry with a rung missing from the detection table: %v", s)
+	}
+	for _, skip := range []string{"five", "worth noting"} {
+		if _, ok := s[skip]; ok {
+			t.Errorf("%q must not be detected by default: %v", skip, s)
+		}
+	}
+	if s = FromReportForDetection(rep, true); s["five"] != "figure" {
+		t.Errorf("all=true must opt into the unvetted rest: %v", s)
+	}
+	if _, ok := FromReportForDetection(rep, true)["worth noting"]; ok {
+		t.Error("a phrase has no ladder and can never be detected, even with all=true")
+	}
+}
+
 func TestApplySwapsProseAndCarriesCase(t *testing.T) {
 	s := swaps()
 	got, _, _ := s.Apply("Load-bearing checks sit on the substrate.", State{})

@@ -108,6 +108,73 @@ func TestApplyRetargetsInsteadOfDuplicating(t *testing.T) {
 	}
 }
 
+// A prior install left the command up to date but the matcher stale — the shape a widened
+// Hooks.Matcher produces on an existing machine. Action must read "updated", or -dry-run tells
+// the caller nothing is changing right when it's about to repair a matcher, and Settled would
+// tell the real install path to skip the write entirely, leaving the repair unapplied.
+func TestApplyReportsUpdatedForMatcherOnlyChange(t *testing.T) {
+	const staleMatcherFixture = `{
+	  "hooks": {
+	    "PreToolUse": [
+	      {"matcher": "Write|Edit", "hooks": [{"type": "command", "command": "/bin/basanite writecheck"}]}
+	    ]
+	  }
+	}`
+	path := filepath.Join(t.TempDir(), "settings.json")
+	if err := os.WriteFile(path, []byte(staleMatcherFixture), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	changes := s.Apply("/bin/basanite")
+	var pre Change
+	for _, c := range changes {
+		if c.Hook.Event == "PreToolUse" {
+			pre = c
+		}
+	}
+	if pre.Action != "updated" {
+		t.Errorf("matcher-only change reported %q, want %q", pre.Action, "updated")
+	}
+	if Settled(changes) {
+		t.Error("a matcher repair must not report settled, or the caller skips the write")
+	}
+	var got struct {
+		Hooks struct {
+			PreToolUse []struct {
+				Matcher string `json:"matcher"`
+			} `json:"PreToolUse"`
+		} `json:"hooks"`
+	}
+	b, _ := s.Bytes()
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	var wantMatcher string
+	for _, h := range Hooks {
+		if h.Event == "PreToolUse" && h.Sub == "writecheck" {
+			wantMatcher = h.Matcher
+		}
+	}
+	if len(got.Hooks.PreToolUse) != 1 || got.Hooks.PreToolUse[0].Matcher != wantMatcher {
+		t.Errorf("matcher not repaired to %q:\n%s", wantMatcher, b)
+	}
+
+	// Second run against the now-current matcher: genuinely unchanged.
+	second := s.Apply("/bin/basanite")
+	for _, c := range second {
+		if c.Action != "unchanged" {
+			t.Errorf("re-running against a repaired matcher reported %q for %s", c.Action, c.Hook.Event)
+		}
+	}
+	if !Settled(second) {
+		t.Error("a repaired matcher, re-applied, must report settled")
+	}
+}
+
 func TestRemoveLeavesForeignHooksAlone(t *testing.T) {
 	s, _ := loadFixture(t)
 	s.Apply("/new/bin/basanite")

@@ -29,6 +29,43 @@ live report the whole time.
   it at a prompt.
 - `install.Hook` gains a `Matcher`, and `retarget` now repairs a wrong matcher
   on an existing registration instead of leaving a hook that never fires.
+- **`writecheck`'s matcher widens to `Write|Edit` plus five Linear write
+  tools: `save_issue`, `save_comment`, `save_project`, `save_document`,
+  `save_status_update`.** A Linear comment, ticket, document, or status
+  update is exactly the case the section above names — published straight
+  from a tool call, never streaming to the terminal `display` watches.
+  `extractWritecheckText` now also reads `tool_input.body` (`save_comment`,
+  `save_status_update`) and `tool_input.description`/`content`
+  (`save_issue`/`save_project`/`save_document` on a full-content update,
+  `content` already shared with Write). A patch-based edit — `save_issue`,
+  `save_project`, and `save_document` all support one — isn't covered, since
+  pulling prose out of a patch op list isn't worth it for a first pass, and
+  the per-session dedup means a patch-heavy thread still gets checked on its
+  next full-content write. Found live: a `load-bearing` that reached a
+  posted Linear comment with none of the three other hooks in a position to
+  catch it.
+- **`Apply` was reporting `"unchanged"` for a matcher-only repair.** The
+  action label compared only the command string (`was == want`), so widening
+  `Hooks[].Matcher` on an already-installed machine — exactly what the bullet
+  above needed — produced a dry-run that said nothing was changing, and a
+  real install that `Settled()` would have told the caller to skip writing
+  entirely: the matcher repair `retarget` already performs would never have
+  reached disk. `retarget` now also returns whether it rewrote the matcher,
+  and `Apply` folds that into the action. Caught before it shipped, installing
+  this exact change.
+- **`writecheck` was silently skipping every known tic the judge couldn't
+  match to a ladder rung.** `FromReport`'s swap table requires a `demote_to`
+  — correct for `display`'s live substitution, which needs an actual
+  replacement word — but `writecheck` reused the same table purely to detect
+  a word's presence, so a verdict of "known tic, no clean substitute" (which
+  `judge.go` treats as coherent and worth keeping, not a rejected verdict)
+  was invisible to the one hook meant to catch it before the text shipped.
+  `arm` is the standing example from the bullet above: `known: true`, no
+  ladder rung fit the writer's actual uses, zero writecheck coverage. New
+  `display.FromReportForDetection` keeps the empty-replacement entries —
+  unsafe to hand to the real substitution path, so `writecheck` is the only
+  caller — and the message drops the `→ rung` arrow for those, printing
+  `(no clean substitute)` instead.
 
 ## v0.8.0 (2026-08-03) — shown, and where the rung came from
 
