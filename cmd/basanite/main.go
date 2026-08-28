@@ -1015,6 +1015,31 @@ func extractWritecheckText(in writecheckInput) (text, label string) {
 	return text, label
 }
 
+// writecheckExternal reports whether this call publishes outside the working
+// tree — the five Linear write tools, none of which carry a file_path — as
+// opposed to a local Write/Edit. The two must dedupe independently: a local
+// edit is low-stakes and rewritten freely, so once per session is enough, but
+// an earlier local flag on a word must never spend the session's one warning
+// before that word has ever actually shipped externally. Found live: a
+// scratch-file "load-bearing" flagged once early in a session, then reaching
+// a posted Linear comment 40+ turns later with zero fresh warning, because a
+// single shared seen-set couldn't tell "named the tendency" from "this exact
+// word is shipping right now" apart.
+func writecheckExternal(in writecheckInput) bool {
+	return in.ToolInput.FilePath == ""
+}
+
+// writecheckSeenName is the per-session, per-destination-class dedup file:
+// local Write/Edit calls share one, Linear calls share a separate one, so
+// flagging a word in a scratch file can't suppress its first real trip
+// external, and vice versa.
+func writecheckSeenName(sessionID string, external bool) string {
+	if external {
+		return "written-external-" + sessionID
+	}
+	return "written-" + sessionID
+}
+
 func runWritecheck(args []string) error {
 	fs := flag.NewFlagSet("writecheck", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -1062,10 +1087,15 @@ func runWritecheck(args []string) error {
 		return nil
 	}
 
-	// Once per word per session. The curated list carries short entries like
-	// "arm" that collide with ordinary identifiers, so the cost of a wrong
-	// match has to be one line and then nothing.
-	seenPath := filepath.Join(dir, "written-"+in.SessionID)
+	// Once per word per session, per destination class (writecheckExternal):
+	// a local Write/Edit and a Linear publish keep separate seen-sets, so a
+	// word already named in a scratch file still gets its first warning the
+	// moment it actually reaches somewhere external. The curated list also
+	// carries short entries like "arm" that collide with ordinary
+	// identifiers, so within one class the cost of a wrong match still has
+	// to be one line and then nothing.
+	external := writecheckExternal(in)
+	seenPath := filepath.Join(dir, writecheckSeenName(in.SessionID, external))
 	seen := loadSeenWords(seenPath)
 	fresh := make([]string, 0, len(counts))
 	for w, n := range counts {
@@ -1081,7 +1111,7 @@ func runWritecheck(args []string) error {
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "basanite — words you lean on, in the text about to be written to %s", label)
-	b.WriteString(" (awareness, not prohibition; each named once per session):\n")
+	b.WriteString(" (awareness, not prohibition; each named once per session, and once more the first time it reaches somewhere external):\n")
 	for _, w := range fresh {
 		if rep := swaps[w]; rep != "" {
 			fmt.Fprintf(&b, "  %s ×%d → %s\n", w, counts[w], rep)
@@ -1496,7 +1526,12 @@ func gloveLoader(dataDir string) pipeline.VectorLoader {
 	}
 }
 
-// pruneMarkers drops session markers older than 30 days.
+// pruneMarkers drops session markers older than 30 days: the injection
+// marker, display fence state, and both writecheck seen-word sets
+// (writecheckSeenName's "written-" and "written-external-" share the
+// "written-" prefix). Left unswept before writecheckSeenName split the seen
+// set in two — a pre-existing gap that doubling the file count made worth
+// closing here rather than leaving it to grow twice as fast.
 func pruneMarkers(dir string) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -1504,7 +1539,9 @@ func pruneMarkers(dir string) {
 	}
 	cutoff := time.Now().AddDate(0, 0, -30)
 	for _, e := range entries {
-		if !strings.HasPrefix(e.Name(), "injected-") && !strings.HasPrefix(e.Name(), displayStatePrefix) {
+		if !strings.HasPrefix(e.Name(), "injected-") &&
+			!strings.HasPrefix(e.Name(), displayStatePrefix) &&
+			!strings.HasPrefix(e.Name(), "written-") {
 			continue
 		}
 		if info, err := e.Info(); err == nil && info.ModTime().Before(cutoff) {

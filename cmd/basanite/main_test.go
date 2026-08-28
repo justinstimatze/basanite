@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -309,5 +311,166 @@ func TestSeenWordsRoundTrip(t *testing.T) {
 	saveSeenWords(p, seen, []string{"calibration"})
 	if seen = loadSeenWords(p); len(seen) != 3 || !seen["calibration"] {
 		t.Errorf("append lost prior words: %v", seen)
+	}
+}
+
+// A Write/Edit call always carries file_path; none of the five Linear write
+// tools do. writecheckExternal reads that same signal extractWritecheckText
+// already uses for the label, rather than string-matching the "Linear" label
+// itself, so the two can't drift apart.
+func TestWritecheckExternal(t *testing.T) {
+	var local, external writecheckInput
+	local.ToolInput.FilePath = "/a/app.go"
+	local.ToolInput.NewString = "func f() {}"
+	external.ToolInput.Body = "this is load-bearing"
+	if writecheckExternal(local) {
+		t.Error("a Write/Edit call (file_path set) should not read as external")
+	}
+	if !writecheckExternal(external) {
+		t.Error("a Linear call (no file_path) should read as external")
+	}
+}
+
+func TestWritecheckSeenNameSeparatesClasses(t *testing.T) {
+	local := writecheckSeenName("sess", false)
+	external := writecheckSeenName("sess", true)
+	if local == external {
+		t.Fatalf("local and external dedup files must differ, both got %q", local)
+	}
+	if local != "written-sess" {
+		t.Errorf("local seen name = %q, want %q", local, "written-sess")
+	}
+	if external != "written-external-sess" {
+		t.Errorf("external seen name = %q, want %q", external, "written-external-sess")
+	}
+}
+
+// runWritecheckCapture feeds stdinJSON to runWritecheck through a swapped
+// os.Stdin and returns whatever it wrote to a swapped os.Stdout.
+// runWritecheck reads/writes the real os.Stdin/os.Stdout directly (same as
+// runHook and runDisplay), so this is the only way to exercise it end to end.
+func runWritecheckCapture(t *testing.T, args []string, stdinJSON string) string {
+	t.Helper()
+	inR, inW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		inW.WriteString(stdinJSON)
+		inW.Close()
+	}()
+	outR, outW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldIn, oldOut := os.Stdin, os.Stdout
+	os.Stdin, os.Stdout = inR, outW
+	err = runWritecheck(args)
+	os.Stdin, os.Stdout = oldIn, oldOut
+	outW.Close()
+	inR.Close()
+	if err != nil {
+		t.Fatalf("runWritecheck(%v) = %v, want nil", args, err)
+	}
+	out, err := io.ReadAll(outR)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(out)
+}
+
+// TestRunWritecheckDedupesPerDestinationClass is the regression test for the
+// incident that motivated writecheckExternal: "load-bearing" was flagged once
+// in a local scratch write early in a session, then reached a posted Linear
+// comment 40+ turns later with zero fresh warning, because a single seen-set
+// shared across every matched tool call had already spent the session's one
+// flag on the local hit. Local and external must dedupe independently, and
+// each must still dedupe once within its own class — the noise reduction the
+// "once per session" design exists for in the first place.
+func TestRunWritecheckDedupesPerDestinationClass(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	rep := &report.Report{
+		GeneratedAt: time.Now(),
+		Entries: []report.Entry{
+			{Lemma: "load-bearing", Known: true, DemoteTo: "supporting"},
+		},
+	}
+	path, err := report.Path()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rep.Save(path); err != nil {
+		t.Fatal(err)
+	}
+
+	const sessID = "sess-dedup-test"
+	toJSON := func(in writecheckInput) string {
+		in.SessionID = sessID
+		b, err := json.Marshal(in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	localWrite := func(content string) writecheckInput {
+		var in writecheckInput
+		in.ToolInput.FilePath = "/tmp/notes.md"
+		in.ToolInput.Content = content
+		return in
+	}
+	linearComment := func(body string) writecheckInput {
+		var in writecheckInput
+		in.ToolInput.Body = body
+		return in
+	}
+
+	if out := runWritecheckCapture(t, nil, toJSON(localWrite("this fix is load-bearing"))); !strings.Contains(out, "load-bearing") {
+		t.Fatalf("first local write should flag load-bearing, got %q", out)
+	}
+	if out := runWritecheckCapture(t, nil, toJSON(localWrite("still load-bearing here"))); strings.Contains(out, "load-bearing") {
+		t.Fatalf("second local write should be suppressed by local dedup, got %q", out)
+	}
+	if out := runWritecheckCapture(t, nil, toJSON(linearComment("shipping this load-bearing comment"))); !strings.Contains(out, "load-bearing") {
+		t.Fatalf("first external write must flag despite the earlier local flag, got %q", out)
+	}
+	if out := runWritecheckCapture(t, nil, toJSON(linearComment("another load-bearing comment"))); strings.Contains(out, "load-bearing") {
+		t.Fatalf("second external write should be suppressed by external dedup, got %q", out)
+	}
+}
+
+// pruneMarkers used to sweep only "injected-" and "display-" markers, so
+// "written-" (and, after writecheckSeenName split it in two,
+// "written-external-") accumulated forever.
+func TestPruneMarkersSweepsWritecheckSeenFiles(t *testing.T) {
+	dir := t.TempDir()
+	old := time.Now().AddDate(0, 0, -31)
+	touch := func(name string, mtime time.Time) {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(p, mtime, mtime); err != nil {
+			t.Fatal(err)
+		}
+	}
+	touch("written-sess1", old)
+	touch("written-external-sess1", old)
+	touch("injected-sess1", old)
+	touch("display-sess1.json", old)
+	touch("written-sess2", time.Now()) // fresh: must survive
+	touch("report.json", old)          // not a session marker: must survive regardless of age
+
+	pruneMarkers(dir)
+
+	for _, gone := range []string{"written-sess1", "written-external-sess1", "injected-sess1", "display-sess1.json"} {
+		if _, err := os.Stat(filepath.Join(dir, gone)); !os.IsNotExist(err) {
+			t.Errorf("%s should have been pruned, stat err = %v", gone, err)
+		}
+	}
+	for _, stay := range []string{"written-sess2", "report.json"} {
+		if _, err := os.Stat(filepath.Join(dir, stay)); err != nil {
+			t.Errorf("%s should have survived, stat err = %v", stay, err)
+		}
 	}
 }

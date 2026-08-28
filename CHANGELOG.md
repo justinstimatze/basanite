@@ -1,5 +1,39 @@
 # Changelog
 
+## v0.10.0 (2026-08-27) — one warning, spent in the wrong place
+
+Reported live: a several-hour session where `load-bearing` was named once by
+the ambient turn-start report, went silent on it for the rest of the session
+as designed, and then reached a posted Linear comment 40+ turns later with no
+fresh warning at all — caught only by an unrelated word-budget hook forcing a
+human-review prompt on that exact call for length reasons, not by writecheck.
+Without that coincidence it would have shipped clean.
+
+The ambient report (`hook`) and `writecheck` already dedupe on separate
+marker files — `injected-<session>` and `written-<session>` — so the two were
+never actually conflated. The gap was one layer down: `written-<session>`
+itself was a single seen-set shared across every matched tool call, so a word
+flagged once on an earlier local `Write`/`Edit` (a scratch note, a plan file,
+anything mid-session) silently spent the session's one warning before the
+word had ever reached anywhere external.
+
+- **`writecheck` dedupes per destination class, not just per session.**
+  `writecheckExternal` reads the same file_path-presence signal
+  `extractWritecheckText` already uses to label the destination — Write/Edit
+  calls always carry one, none of the five Linear write tools do — and
+  `written-<session>` splits into `written-<session>` (local) and
+  `written-external-<session>` (Linear). A local flag can no longer suppress
+  a word's first real trip external, and each class still dedupes once
+  within itself, which is the noise reduction "once per session" existed for
+  in the first place. The hook message and the README now say "once per
+  session, and once more the first time it reaches somewhere external"
+  instead of a flat "once per session," since that's what actually happens.
+- **`pruneMarkers` now sweeps `written-` files.** It was never swept at all —
+  only `injected-` and `display-` markers aged out — so doubling the prefix
+  today would have doubled a pre-existing leak instead of just fixing the
+  dedup gap. Both `written-<session>` and `written-external-<session>` share
+  the `written-` prefix, so one check covers both.
+
 ## v0.9.0 (2026-08-24) — the surface nothing was watching
 
 All three registered hooks were input-side or screen-side. `display` swaps a
