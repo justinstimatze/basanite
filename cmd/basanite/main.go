@@ -1044,10 +1044,11 @@ func runWritecheck(args []string) error {
 	fs := flag.NewFlagSet("writecheck", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	var (
-		path   = fs.String("report", "", "report path (default: state dir)")
-		all    = fs.Bool("all", false, "flag every judged entry, not just curated known-tics")
-		min    = fs.Int("min", 1, "minimum occurrences in one write before flagging")
-		maxAge = fs.Duration("max-age", 7*24*time.Hour, "ignore reports older than this")
+		path    = fs.String("report", "", "report path (default: state dir)")
+		all     = fs.Bool("all", false, "flag every judged entry, not just curated known-tics")
+		min     = fs.Int("min", 1, "minimum occurrences in one write before flagging")
+		maxAge  = fs.Duration("max-age", 7*24*time.Hour, "ignore reports older than this")
+		noDedup = fs.Bool("no-dedup", false, "skip the per-session seen-set: report every currently flagged word, not just the ones fresh this session — for a second, independent caller checking the same event (e.g. another hook folding this verdict into its own gate) without racing the seen-set file")
 	)
 	if fs.Parse(args) != nil {
 		return nil
@@ -1082,10 +1083,6 @@ func runWritecheck(args []string) error {
 	// spans, and already matches inflected forms against the lemma table. The
 	// rewritten text is thrown away — nothing here edits what gets written.
 	_, _, counts := swaps.Apply(text, display.State{})
-	dir, err := report.StateDir()
-	if err != nil {
-		return nil
-	}
 
 	// Once per word per session, per destination class (writecheckExternal):
 	// a local Write/Edit and a Linear publish keep separate seen-sets, so a
@@ -1094,12 +1091,30 @@ func runWritecheck(args []string) error {
 	// carries short entries like "arm" that collide with ordinary
 	// identifiers, so within one class the cost of a wrong match still has
 	// to be one line and then nothing.
-	external := writecheckExternal(in)
-	seenPath := filepath.Join(dir, writecheckSeenName(in.SessionID, external))
-	seen := loadSeenWords(seenPath)
-	fresh := make([]string, 0, len(counts))
+	//
+	// -no-dedup skips this whole seen-set entirely, touching no state at
+	// all: a second, independent caller checking the same PreToolUse event
+	// (to fold this verdict into its own gate decision, rather than relying
+	// on Claude Code to merge two separately-registered hooks) would
+	// otherwise race the registered hook's seen-set file for the same
+	// event — whichever runs second finds every word already marked seen
+	// and reports nothing. That caller is asking "does a human need to look
+	// at this write", which doesn't care whether the assistant already saw
+	// this word flagged three tickets ago.
+	var fresh []string
+	var seenPath string
+	var seen map[string]bool
+	if !*noDedup {
+		dir, err := report.StateDir()
+		if err != nil {
+			return nil
+		}
+		external := writecheckExternal(in)
+		seenPath = filepath.Join(dir, writecheckSeenName(in.SessionID, external))
+		seen = loadSeenWords(seenPath)
+	}
 	for w, n := range counts {
-		if n >= *min && !seen[w] {
+		if n >= *min && (*noDedup || !seen[w]) {
 			fresh = append(fresh, w)
 		}
 	}
@@ -1107,11 +1122,17 @@ func runWritecheck(args []string) error {
 		return nil
 	}
 	sort.Slice(fresh, func(i, j int) bool { return counts[fresh[i]] > counts[fresh[j]] })
-	saveSeenWords(seenPath, seen, fresh)
+	if !*noDedup {
+		saveSeenWords(seenPath, seen, fresh)
+	}
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "basanite — words you lean on, in the text about to be written to %s", label)
-	b.WriteString(" (awareness, not prohibition; each named once per session, and once more the first time it reaches somewhere external):\n")
+	if *noDedup {
+		b.WriteString(" (awareness, not prohibition; every flagged word in this text, no session dedup):\n")
+	} else {
+		b.WriteString(" (awareness, not prohibition; each named once per session, and once more the first time it reaches somewhere external):\n")
+	}
 	for _, w := range fresh {
 		if rep := swaps[w]; rep != "" {
 			fmt.Fprintf(&b, "  %s ×%d → %s\n", w, counts[w], rep)

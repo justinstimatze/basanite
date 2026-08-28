@@ -439,6 +439,69 @@ func TestRunWritecheckDedupesPerDestinationClass(t *testing.T) {
 	}
 }
 
+// TestRunWritecheckNoDedup covers the -no-dedup flag added for a second,
+// independent caller (e.g. another PreToolUse hook forwarding the same event
+// to fold this verdict into its own gate decision) that would otherwise race
+// the registered hook's seen-set file for that same event: whichever runs
+// second would find every word already marked seen and report nothing.
+// -no-dedup must flag every call regardless of prior calls in the same
+// session, and must not touch the seen-set files at all.
+func TestRunWritecheckNoDedup(t *testing.T) {
+	stateDir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", stateDir)
+
+	rep := &report.Report{
+		GeneratedAt: time.Now(),
+		Entries: []report.Entry{
+			{Lemma: "load-bearing", Known: true, DemoteTo: "supporting"},
+		},
+	}
+	path, err := report.Path()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rep.Save(path); err != nil {
+		t.Fatal(err)
+	}
+
+	toJSON := func(in writecheckInput) string {
+		in.SessionID = "sess-no-dedup-test"
+		in.ToolInput.Body = "this comment is load-bearing"
+		b, err := json.Marshal(in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	var in writecheckInput
+	stdin := toJSON(in)
+
+	for i := 0; i < 2; i++ {
+		out := runWritecheckCapture(t, []string{"-no-dedup"}, stdin)
+		if !strings.Contains(out, "load-bearing") {
+			t.Fatalf("call %d: -no-dedup should flag load-bearing every time, got %q", i, out)
+		}
+		if !strings.Contains(out, "no session dedup") {
+			t.Errorf("call %d: -no-dedup message should say so, got %q", i, out)
+		}
+	}
+
+	entries, err := os.ReadDir(stateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found []string
+	filepath.WalkDir(stateDir, func(p string, d os.DirEntry, err error) error {
+		if err == nil && !d.IsDir() && strings.HasPrefix(d.Name(), "written-") {
+			found = append(found, p)
+		}
+		return nil
+	})
+	if len(found) != 0 {
+		t.Errorf("-no-dedup should touch no seen-set file, found %v (state dir entries: %v)", found, entries)
+	}
+}
+
 // pruneMarkers used to sweep only "injected-" and "display-" markers, so
 // "written-" (and, after writecheckSeenName split it in two,
 // "written-external-") accumulated forever.

@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.11.0 (2026-08-28) — a second caller without a second seen-set
+
+writecheck's dedup assumed it was the only caller ever marking a word seen
+for a session. A second, independent process forwarding the same PreToolUse
+event — to fold basanite's verdict into its own gate decision, rather than
+relying on Claude Code to merge two separately-registered hooks — would race
+that same seen-set file: whichever runs second finds every word already
+marked seen and reports nothing, silently.
+
+- **`writecheck -no-dedup`**: skips the seen-set read and write entirely, so
+  a second caller checking the same event gets every currently flagged word
+  regardless of what the registered hook already marked seen — and touches
+  no state at all, since `report.StateDir()` is now only called on the
+  deduped path. Same wire format and `additionalContext` shape as the
+  deduped call; the message names itself ("no session dedup") so the two
+  outputs are never mistaken for each other.
+- **`hooks/pre-commit` is now tracked.** The CodeScene delta check it runs
+  had only ever lived in `.git/hooks/pre-commit`, so a fresh clone got no
+  pre-commit hook at all. `git config core.hooksPath hooks` opts in — that's
+  a local, per-clone setting, so nothing changes for a clone that doesn't
+  set it.
+
 ## v0.10.0 (2026-08-27) — one warning, spent in the wrong place
 
 Reported live: a several-hour session where `load-bearing` was named once by

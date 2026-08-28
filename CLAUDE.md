@@ -21,3 +21,6 @@ stone an assayer streaks a sample against to judge it.
   Tests that need them skip cleanly when absent.
 - Output tone is awareness, never prohibition — see DESIGN.md on
   ironic-process priming before changing any injection wording.
+- An optional CodeScene pre-commit check lives at `hooks/pre-commit`; opt in
+  with `git config core.hooksPath hooks` (a local, per-clone setting — it
+  isn't distributed by cloning).
