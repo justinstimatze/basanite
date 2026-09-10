@@ -166,9 +166,9 @@ func Load(path string) (*Report, error) {
 //
 // Either lane's unused share spills to the other, so a quiet week for one still
 // fills the budget rather than shrinking the injection.
-func (r *Report) RenderHook(maxWords, maxPhrases int) string {
+func (r *Report) RenderHook(maxWords, maxPhrases int, ledger *Ledger) string {
 	sub := &Report{GeneratedAt: r.GeneratedAt}
-	for _, e := range r.HookEntries(maxWords, maxPhrases) {
+	for _, e := range r.HookEntries(maxWords, maxPhrases, ledger) {
 		e.JudgeNote = firstSentence(e.JudgeNote)
 		sub.Entries = append(sub.Entries, e)
 	}
@@ -180,7 +180,7 @@ func (r *Report) RenderHook(maxWords, maxPhrases int) string {
 // words were shown" is a fact worth recording, and the string is a poor place
 // to read it back from — the ledger counts report membership, which differs
 // from injection precisely because this function takes three of four.
-func (r *Report) HookEntries(maxWords, maxPhrases int) []Entry {
+func (r *Report) HookEntries(maxWords, maxPhrases int, ledger *Ledger) []Entry {
 	if maxWords <= 0 {
 		maxWords = len(r.Entries) // 0 = uncapped, the pre-cap behavior
 	}
@@ -206,9 +206,7 @@ func (r *Report) HookEntries(maxWords, maxPhrases int) []Entry {
 			risers = append(risers, e)
 		}
 	}
-	// Stable, so entries keep the pipeline's ordering within each group and
-	// only the curated ones move.
-	sort.SliceStable(chronic, func(i, j int) bool { return chronic[i].Known && !chronic[j].Known })
+	chronic = orderChronicLane(chronic, ledger)
 
 	// Half the word budget to each lane, chronic rounding up: at the shipped
 	// cap of five that is three chronic and two risers, and the lane that has
@@ -222,6 +220,56 @@ func (r *Report) HookEntries(maxWords, maxPhrases int) []Entry {
 	}
 	picked = append(picked, take(phrases, maxPhrases)...)
 	return picked
+}
+
+// orderChronicLane decides which chronic entries HookEntries's take/spill
+// logic below sees first. One floor slot goes to whichever known-tic has
+// gone longest without a real injection — LedgerEntry.LastInjected, zero
+// value (never injected) sorting first — so a standing curated instruction
+// can never be shut out entirely. Every other chronic entry, known or not,
+// competes purely on Rate.
+//
+// Replaces a categorical "all known before all non-known" partition that
+// held until the curated list grew past the chronic share: curating a 4th
+// known-tic ("running", the corpus's single highest full-window rate) bumped
+// a 3rd ("arm") out of the injection entirely, with no distinction between
+// "arm's lean has faded" and "arm lost a rate coincidence to a newer entry" —
+// the exact ambiguity DESIGN.md named as the reason the original rotation
+// rule (retirement, not deferral) was designed and dropped. A floor slot
+// that simply defers rather than retires has nowhere-to-retire-to a
+// displaced word next cycle it is the one least recently shown.
+func orderChronicLane(chronic []Entry, ledger *Ledger) []Entry {
+	floorIdx := -1
+	var oldest time.Time
+	for i, e := range chronic {
+		if !e.Known {
+			continue
+		}
+		var last time.Time
+		if ledger != nil {
+			if le := ledger.Lemmas[e.Lemma]; le != nil {
+				last = le.LastInjected
+			}
+		}
+		if floorIdx == -1 || last.Before(oldest) {
+			floorIdx, oldest = i, last
+		}
+	}
+
+	rest := make([]Entry, 0, len(chronic))
+	for i, e := range chronic {
+		if i != floorIdx {
+			rest = append(rest, e)
+		}
+	}
+	// Stable: entries at the same rate keep the pipeline's original order,
+	// the same guarantee the categorical sort it replaces used to provide.
+	sort.SliceStable(rest, func(i, j int) bool { return rest[i].Rate > rest[j].Rate })
+
+	if floorIdx == -1 {
+		return rest
+	}
+	return append([]Entry{chronic[floorIdx]}, rest...)
 }
 
 func take(es []Entry, n int) []Entry {

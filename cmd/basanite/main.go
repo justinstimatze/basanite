@@ -1408,8 +1408,14 @@ func runHook(args []string) error {
 		// nothing, so a broken pipeline can't rot invisibly for weeks.
 		out = staleNote(rep.GeneratedAt, dir)
 	default:
-		shown = rep.HookEntries(*topWords, *topPhrases)
-		out = rep.RenderHook(*topWords, *topPhrases)
+		// Loaded here, before selection, not just after in recordInjection:
+		// the chronic lane's floor slot needs to know which known-tic has
+		// gone longest without a real injection. Best-effort like every
+		// other load on this path — orderChronicLane treats a nil ledger
+		// safely.
+		ledger, _ := report.LoadLedger(filepath.Join(dir, report.LedgerName))
+		shown = rep.HookEntries(*topWords, *topPhrases, ledger)
+		out = rep.RenderHook(*topWords, *topPhrases, ledger)
 	}
 	if out == "" {
 		return nil

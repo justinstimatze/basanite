@@ -201,7 +201,7 @@ func TestRenderHookCapsRoutesSeparately(t *testing.T) {
 		Entry{Kind: "phrase", Lemma: "worth noting", Count: 9, Projects: 2},
 		Entry{Kind: "phrase", Lemma: "that said", Count: 6, Projects: 2},
 	)
-	out := r.RenderHook(2, 1)
+	out := r.RenderHook(2, 1, nil)
 	for _, want := range []string{"alpha", "beta", `"worth noting"`} {
 		if !strings.Contains(out, want) {
 			t.Errorf("capped view lost %s:\n%s", want, out)
@@ -212,7 +212,7 @@ func TestRenderHookCapsRoutesSeparately(t *testing.T) {
 			t.Errorf("capped view leaked %s past its route budget:\n%s", drop, out)
 		}
 	}
-	if got := r.RenderHook(0, 0); !strings.Contains(got, "gamma") || !strings.Contains(got, "that said") {
+	if got := r.RenderHook(0, 0, nil); !strings.Contains(got, "gamma") || !strings.Contains(got, "that said") {
 		t.Errorf("0 must mean uncapped, the pre-cap behavior:\n%s", got)
 	}
 }
@@ -223,7 +223,7 @@ func TestRenderHookCutsNotesToOneSentence(t *testing.T) {
 		JudgeNote: `Used loosely to mean "record" or "log" in most sentences. When the writer says "update tracker" they often mean "log the finding", not a named system.`,
 		Ladder:    []Rung{{Word: "log", IC: 1}, {Word: "tracker", IC: 5}},
 	}}}
-	out := r.RenderHook(5, 2)
+	out := r.RenderHook(5, 2, nil)
 	if !strings.Contains(out, "in most sentences.") {
 		t.Errorf("first sentence of the note must survive:\n%s", out)
 	}
@@ -259,17 +259,26 @@ func word(kind, lemma string, known bool) Entry {
 // first-come word cap spends every slot on them and the chronic lane is never
 // heard. "load-bearing" sat at position 13 of 24 as a curated known tic,
 // running near sixty a day, and was injected exactly never.
+//
+// load-bearing's rate here is deliberately the lowest of the bunch — this is
+// the floor slot doing its job, not a tie or a fluke of ordering. Without the
+// floor, the six higher-rate chronicN entries would take all three chronic
+// slots and load-bearing would never appear.
 func TestHookBudgetDoesNotStarveTheChronicLane(t *testing.T) {
 	r := &Report{}
 	for i := 0; i < 8; i++ {
 		r.Entries = append(r.Entries, word("riser", fmt.Sprintf("riser%d", i), false))
 	}
 	for i := 0; i < 6; i++ {
-		r.Entries = append(r.Entries, word("chronic", fmt.Sprintf("chronic%d", i), false))
+		e := word("chronic", fmt.Sprintf("chronic%d", i), false)
+		e.Rate = 2.0
+		r.Entries = append(r.Entries, e)
 	}
-	r.Entries = append(r.Entries, word("chronic", "load-bearing", true))
+	lb := word("chronic", "load-bearing", true)
+	lb.Rate = 0.3
+	r.Entries = append(r.Entries, lb)
 
-	out := r.RenderHook(5, 2)
+	out := r.RenderHook(5, 2, nil)
 	if !strings.Contains(out, "load-bearing") {
 		t.Errorf("the curated known tic never reached the injection:\n%s", out)
 	}
@@ -285,7 +294,7 @@ func TestOneEmptyLaneSpillsToTheOther(t *testing.T) {
 	for i := 0; i < 8; i++ {
 		r.Entries = append(r.Entries, word("riser", fmt.Sprintf("riser%d", i), false))
 	}
-	out := r.RenderHook(5, 2)
+	out := r.RenderHook(5, 2, nil)
 	for i := 0; i < 5; i++ {
 		if !strings.Contains(out, fmt.Sprintf("riser%d", i)) {
 			t.Errorf("riser%d missing — the chronic share was not spilled back:\n%s", i, out)
@@ -303,7 +312,7 @@ func TestBudgetSkipsWhatRenderDrops(t *testing.T) {
 		Ladder: []Rung{{Word: "floor", IC: 1}, {Word: "stronger", IC: 9}},
 	}
 	r := &Report{Entries: []Entry{dead}}
-	if out := r.RenderHook(5, 2); strings.Contains(out, "floor") {
+	if out := r.RenderHook(5, 2, nil); strings.Contains(out, "floor") {
 		t.Fatalf("an entry with no rung below the lemma must not render:\n%s", out)
 	}
 	for i := 0; i < 3; i++ {
@@ -314,7 +323,7 @@ func TestBudgetSkipsWhatRenderDrops(t *testing.T) {
 	}
 	// Five renderable words: three chronic, two risers. chronic2 is the tell —
 	// it only makes the cut if the dead entry never took a slot.
-	out := r.RenderHook(5, 2)
+	out := r.RenderHook(5, 2, nil)
 	for _, want := range []string{"chronic0", "chronic1", "chronic2", "riser0", "riser1"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("%s missing — the dead entry ate a budget slot:\n%s", want, out)
@@ -322,74 +331,136 @@ func TestBudgetSkipsWhatRenderDrops(t *testing.T) {
 	}
 }
 
-// Curated entries are the writer's standing instruction and outrank the
-// automatically-detected chronic entries competing for the same share.
-func TestKnownTicsWinTheChronicShare(t *testing.T) {
+// A curated entry is the writer's standing instruction, so it gets the one
+// floor slot regardless of rate — unlike the five automatic entries here,
+// all of which run at a higher rate and would otherwise out-rank it.
+func TestKnownTicGetsTheFloorSlotEvenAtLowRate(t *testing.T) {
 	r := &Report{}
 	for i := 0; i < 5; i++ {
-		r.Entries = append(r.Entries, word("chronic", fmt.Sprintf("auto%d", i), false))
+		e := word("chronic", fmt.Sprintf("auto%d", i), false)
+		e.Rate = 3.0
+		r.Entries = append(r.Entries, e)
 	}
-	r.Entries = append(r.Entries, word("chronic", "curated", true))
-	if out := r.RenderHook(5, 2); !strings.Contains(out, "curated") {
-		t.Errorf("a curated tic lost its slot to automatic ones:\n%s", out)
+	curated := word("chronic", "curated", true)
+	curated.Rate = 0.1
+	r.Entries = append(r.Entries, curated)
+	if out := r.RenderHook(5, 2, nil); !strings.Contains(out, "curated") {
+		t.Errorf("a curated tic lost its floor slot to automatic ones:\n%s", out)
 	}
 }
 
-// Curated-first is a total order, not a tiebreak, and at the shipped cap the
-// chronic share is three. So three renderable curated words take every chronic
-// slot and the automatically-detected ones are unreachable — not ranked below
-// better candidates, unreachable, however high their rate.
+// Replaces the old categorical rule this test used to document: curated-first
+// as a total order, not a tiebreak, meant three renderable curated words took
+// every chronic slot and automatically-detected ones were unreachable however
+// high their rate. Measured live 2026-09-10: curating a 4th known-tic
+// ("running", the corpus's top full-window rate) silently evicted a 3rd
+// ("arm") on pure rate, with no distinction between "arm's lean faded" and
+// "arm lost a coincidence." See DESIGN.md and CHANGELOG.
 //
-// Measured on a live report: 13 chronic entries, 3 of them curated, and the
-// other ten (running at 1.82/1k, confirmed at 1.78, verified at 1.60 among
-// them) had been in every report for seven refreshes without ever being shown.
-// This test exists so that stays a deliberate choice rather than a discovery.
-func TestCuratedWordsCanStarveTheChronicLane(t *testing.T) {
+// The replacement: exactly one floor slot for the least-recently-injected
+// known-tic, regardless of its rate — curated0 here, never injected — and
+// every other chronic slot decided by rate alone, known or not. curated1 and
+// curated2 are curated too, but neither is the floor pick and both run at a
+// lower rate than auto0/auto1, so neither gets a slot this round — proving
+// the floor guarantees one known-tic, not the whole curated bucket.
+func TestChronicLaneFloorProtectsOneKnownTicWithoutStarvingHigherRateEntries(t *testing.T) {
 	r := &Report{}
-	// the automatic ones first, as the pipeline orders them by rate
-	for i := 0; i < 10; i++ {
-		r.Entries = append(r.Entries, word("chronic", fmt.Sprintf("auto%d", i), false))
+	rates := []float64{5.0, 5.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0}
+	for i, rate := range rates {
+		e := word("chronic", fmt.Sprintf("auto%d", i), false)
+		e.Rate = rate
+		r.Entries = append(r.Entries, e)
 	}
-	for i := 0; i < 3; i++ {
-		r.Entries = append(r.Entries, word("chronic", fmt.Sprintf("curated%d", i), true))
-	}
+	curated0 := word("chronic", "curated0", true)
+	curated0.Rate = 0.3
+	curated1 := word("chronic", "curated1", true)
+	curated1.Rate = 0.4
+	curated2 := word("chronic", "curated2", true)
+	curated2.Rate = 0.35
+	r.Entries = append(r.Entries, curated0, curated1, curated2)
 	// risers present, so the chronic share stays at three rather than
 	// spilling into the empty riser slots
 	for i := 0; i < 3; i++ {
 		r.Entries = append(r.Entries, word("riser", fmt.Sprintf("riser%d", i), false))
 	}
 
-	shown := r.HookEntries(5, 0)
+	now := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
+	ledger := &Ledger{Lemmas: map[string]*LedgerEntry{
+		// curated0 has no ledger entry: never injected, oldest by construction.
+		"curated1": {LastInjected: now},
+		"curated2": {LastInjected: now},
+	}}
+
+	shown := r.HookEntries(5, 0, ledger)
 	var chronicShown []string
 	for _, e := range shown {
 		if e.Kind == "chronic" {
 			chronicShown = append(chronicShown, e.Lemma)
 		}
 	}
+	want := map[string]bool{"curated0": true, "auto0": true, "auto1": true}
 	if len(chronicShown) != 3 {
 		t.Fatalf("chronic share = %v, want three slots", chronicShown)
 	}
 	for _, got := range chronicShown {
-		if !strings.HasPrefix(got, "curated") {
-			t.Fatalf("chronic slots = %v, want all curated — the starvation is the documented behavior", chronicShown)
+		if !want[got] {
+			t.Errorf("chronic slots = %v, want exactly %v", chronicShown, want)
 		}
 	}
+	for _, unwanted := range []string{"curated1", "curated2"} {
+		if strings.Contains(strings.Join(chronicShown, ","), unwanted) {
+			t.Errorf("%s is curated but not the floor pick and loses on rate — it must not appear: %v", unwanted, chronicShown)
+		}
+	}
+}
 
-	// And with only two curated words the third slot goes to the highest
-	// automatic one, so the lane is not closed, just full.
-	r2 := &Report{}
-	for i := 0; i < 10; i++ {
-		r2.Entries = append(r2.Entries, word("chronic", fmt.Sprintf("auto%d", i), false))
+// orderChronicLane's own contract, isolated from HookEntries's budget/spill
+// logic: the floor goes to the least-recently-injected known entry, a
+// never-injected one beats any real timestamp, and everything else — known
+// or not — is ranked by rate alone.
+func TestOrderChronicLaneFloorPicksLeastRecentlyInjected(t *testing.T) {
+	now := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
+	chronic := []Entry{
+		{Lemma: "shown-recently", Known: true, Rate: 0.9},
+		{Lemma: "never-shown", Known: true, Rate: 0.1},
+		{Lemma: "shown-long-ago", Known: true, Rate: 0.5},
+		{Lemma: "not-curated", Known: false, Rate: 5.0},
 	}
-	for i := 0; i < 2; i++ {
-		r2.Entries = append(r2.Entries, word("chronic", fmt.Sprintf("curated%d", i), true))
+	ledger := &Ledger{Lemmas: map[string]*LedgerEntry{
+		"shown-recently": {LastInjected: now},
+		"shown-long-ago": {LastInjected: now.Add(-30 * 24 * time.Hour)},
+		// "never-shown" has no ledger entry at all — the case that matters most.
+	}}
+	got := orderChronicLane(chronic, ledger)
+	if len(got) != 4 || got[0].Lemma != "never-shown" {
+		t.Fatalf("floor must go to the never-injected known entry, got %v", lemmaOrder(got))
 	}
-	for i := 0; i < 3; i++ {
-		r2.Entries = append(r2.Entries, word("riser", fmt.Sprintf("riser%d", i), false))
+	// Only the floor slot cares about recency. Everything past it — including
+	// shown-long-ago, a known entry that just lost the floor to never-shown —
+	// is ranked by Rate alone, so shown-recently (0.9) outranks it (0.5).
+	want := []string{"never-shown", "not-curated", "shown-recently", "shown-long-ago"}
+	if lo := lemmaOrder(got); strings.Join(lo, ",") != strings.Join(want, ",") {
+		t.Errorf("got order %v, want %v — floor first, then rate descending regardless of Known", lo, want)
 	}
-	if out := r2.RenderHook(5, 0); !strings.Contains(out, "auto0") {
-		t.Errorf("an unfilled curated share should spill to the automatic lane:\n%s", out)
+}
+
+func TestOrderChronicLaneNilLedgerDoesNotPanic(t *testing.T) {
+	chronic := []Entry{
+		{Lemma: "a", Known: true, Rate: 0.1},
+		{Lemma: "b", Known: false, Rate: 5.0},
 	}
+	got := orderChronicLane(chronic, nil)
+	if len(got) != 2 || got[0].Lemma != "a" {
+		t.Errorf("nil ledger must still give the known entry the floor deterministically, got %v", lemmaOrder(got))
+	}
+}
+
+func lemmaOrder(es []Entry) []string {
+	out := make([]string, len(es))
+	for i, e := range es {
+		out[i] = e.Lemma
+	}
+	return out
 }
 
 // RenderHook must print exactly what HookEntries selects — the count is
@@ -405,8 +476,8 @@ func TestHookEntriesMatchesWhatRenderHookPrints(t *testing.T) {
 	}
 	r.Entries = append(r.Entries, Entry{Kind: "phrase", Lemma: "worth noting", Count: 9})
 
-	out := r.RenderHook(5, 1)
-	picked := r.HookEntries(5, 1)
+	out := r.RenderHook(5, 1, nil)
+	picked := r.HookEntries(5, 1, nil)
 	if len(picked) != 6 {
 		t.Fatalf("picked %d entries, want five words and one phrase", len(picked))
 	}

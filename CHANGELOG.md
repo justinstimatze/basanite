@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.13.0 (2026-09-10) — the list outgrew the slots
+
+Curating a 4th known-tic (`running`, the corpus's top full-window rate)
+silently evicted a 3rd (`arm`) from the turn-start injection — the exact
+"list outgrows the three slots" trigger `DESIGN.md`'s original "no slot
+rotation" entry named as the point to revisit, measured live rather than
+hypothetically. `arm` had been curated 2026-08-02 specifically because it's
+invisible to every automatic route; it lost its slot on a rate coincidence
+against a newer curated word, with nothing distinguishing that from "arm's
+lean actually faded."
+
+- **The chronic lane's known-first partition is gone.** It was a total
+  order, not a tiebreak — three curated words could take every chronic slot
+  regardless of a fourth's rate. `orderChronicLane`
+  (`internal/report/report.go`) replaces it: one floor slot for whichever
+  known-tic has gone longest without a real injection (never-injected beats
+  any real timestamp, via `LedgerEntry.LastInjected` — already tracked,
+  already updated at injection time), every other chronic slot ranked by
+  rate alone, known or not. A curated word still *eventually* wins the
+  floor, rotated among known entries — it's no longer a permanent,
+  simultaneous guarantee for all of them at once.
+- **`HookEntries`/`RenderHook` take a `*report.Ledger` parameter.** The one
+  external caller, `runHook`, now loads the ledger before selection instead
+  of only after (to record) — same load already used at that second point,
+  just moved earlier.
+- `running` came back out of `~/.config/basanite/known-tics.txt`: at the
+  corpus's top rate it wins a slot on merit, so curating it only spent a
+  floor-protection slot on a word that never needed protecting.
+
 ## v0.12.0 (2026-09-10) — a mark instead of a word
 
 The demote rung `display` swaps in is a real word, chosen to still read as a

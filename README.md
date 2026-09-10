@@ -267,11 +267,18 @@ The word budget is **split between the lanes**, half each with chronic
 rounding up, rather than filled in report order. Report order is risers
 first, so a first-come cap spends every slot on them: `load-bearing` sat in
 the report as a curated chronic entry for months, at roughly sixty uses a
-day, and was injected exactly never. Within the chronic share the curated
-known-tics go first — a riser is an observation that a habit *may* be
-forming and it ages out on its own, while a known tic is you having said in
-advance that you never want to see the word. Either lane's unused share
-spills to the other.
+day, and was injected exactly never. Either lane's unused share spills to
+the other.
+
+Within the chronic share, one slot is reserved for whichever curated
+known-tic has gone longest without actually being shown — a riser is an
+observation that a habit *may* be forming and it ages out on its own, while
+a known tic is you having said in advance that you never want to see the
+word, so it gets a guaranteed turn regardless of its current rate. Every
+other chronic slot is decided by rate alone, known or not. A curated word
+*eventually* wins the floor slot, rotated among known entries whenever more
+than one is active — it isn't a permanent, simultaneous guarantee for every
+curated word at once.
 
 ### Not having to read it (`display`)
 
@@ -403,12 +410,14 @@ working, but direct callouts and topic drift are unmeasured confounds.
 
 **"Never shown" is not the same as "not flagged."** The report holds far more
 than the injection prints — the turn-start block takes three chronic entries
-and two risers — and curated entries take the chronic slots first. So a
-detected word can sit in every report for months without ever reaching a
-prompt, which from every other surface looks identical to being ranked fairly
-and losing. The shown-count is what tells them apart, and the shortlist under
-it is the answer: adding a word to `known-tics.txt` is what moves it into the
-chronic share. See DESIGN.md on why the ranking was left alone.
+and two risers. A high-rate detected word can still win a chronic slot on
+rate alone, same as a curated one; what a detected word can't do is claim the
+one floor slot reserved for the least-recently-shown known-tic. The
+shown-count is what tells "never reached a prompt" apart from "ranked fairly
+and lost," and the shortlist under it is the answer: adding a word to
+`known-tics.txt` guarantees it a *shot* at that floor slot, not automatic
+inclusion — only one known-tic holds it at a time. See DESIGN.md on how the
+ranking got here.
 
 ### Is the judge stable? (`ledger -verdicts`)
 

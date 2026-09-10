@@ -100,38 +100,62 @@ don't creep back:
   plain subcommand. But the build-time judge *does* use stull's `spec.Cell`
   as a standalone fence (not its machine runtime) — see below.
 - **Awareness, never prohibition** (see above).
-- **No slot rotation.** The injection's chronic share is three, curated
-  entries sort ahead of automatically-detected ones, and that ordering is a
-  total order rather than a tiebreak. So three renderable curated words take
-  every chronic slot and the detected ones are unreachable — not outranked,
-  unreachable, however high their rate. Measured on a live report: 13 chronic
-  entries, 3 curated, and the other ten had been present for seven refreshes
-  each without ever being shown, `running` at 1.82/1k and `confirmed` at 1.78
-  among them.
+- **~~No slot rotation.~~ Reversed 2026-09-10 — see below.** The injection's
+  chronic share is three, curated entries sort ahead of automatically-detected
+  ones, and that ordering was a total order rather than a tiebreak. So three
+  renderable curated words took every chronic slot and the detected ones were
+  unreachable — not outranked, unreachable, however high their rate. Measured
+  on a live report: 13 chronic entries, 3 curated, and the other ten had been
+  present for seven refreshes each without ever being shown, `running` at
+  1.82/1k and `confirmed` at 1.78 among them.
 
   A rotation rule was designed for this and dropped. Retiring a word that has
   had its turn needs somewhere to retire it *to*, and the curated bucket held
   exactly as many renderable words as there were slots — the rule would have
   been a no-op the day it shipped.
 
-  The behavior it would have fixed is the intended one. A curated entry is
-  the writer having said in advance that they never want to see the word; a
-  detected chronic entry is a suggestion. A standing instruction outranking a
-  suggestion is the design, and the detector still surfaces everything in
-  `basanite report`. What was actually wrong was that the starvation was
-  invisible, so "ranked below better candidates" and "structurally
-  unreachable" looked identical from outside — the same shape as the
-  never-firing curated entries that `basanite audit` was built for. The fix
-  was the measurement, not the ranking: `LedgerEntry.Injected` counts what
-  reached a prompt, distinct from `Refreshes` which counts report membership,
-  and `basanite ledger` names every word that has never been shown.
+  The behavior it would have fixed was believed to be the intended one at the
+  time. A curated entry is the writer having said in advance that they never
+  want to see the word; a detected chronic entry is a suggestion. A standing
+  instruction outranking a suggestion was the design, and the detector still
+  surfaced everything in `basanite report`. What was actually wrong was that
+  the starvation was invisible, so "ranked below better candidates" and
+  "structurally unreachable" looked identical from outside — the same shape
+  as the never-firing curated entries that `basanite audit` was built for.
+  The first fix was the measurement, not the ranking: `LedgerEntry.Injected`
+  counts what reached a prompt, distinct from `Refreshes` which counts report
+  membership, and `basanite ledger` names every word that has never been
+  shown.
 
-  That turns the curated list into the control surface it was always meant to
-  be: read the never-shown rows, decide whether a detected word has earned a
-  standing instruction, and add it. The consequence is that the list is
-  expected to outgrow the three slots — and at that point rotation *within*
-  the curated bucket becomes real work with somewhere to retire to, which is
-  when to revisit it. Not before.
+  That turned the curated list into the control surface it was always meant
+  to be: read the never-shown rows, decide whether a detected word has earned
+  a standing instruction, and add it. The named consequence was that the list
+  was expected to outgrow the three slots — and at that point rotation
+  *within* the curated bucket becomes real work with somewhere to retire to,
+  which is when to revisit it. Not before.
+
+  It outgrew them for real on 2026-09-10: curating `running` (2.58/1k, the
+  corpus's top full-window rate, 22 refreshes / 0 real injections) put 4
+  curated words against 3 slots and silently evicted `arm` — curated
+  2026-08-02 specifically *because* it's invisible to every automatic route —
+  on pure rate, no judgment that it mattered less. A costrel consult
+  (Opus) pointed out what the original rejection missed: the rejected rule
+  was rotation-as-*retirement*, which needs a destination and a judgment
+  call about whether a word earned removal. Rotation-as-*deferral* has
+  neither problem, because nothing is retired — a displaced word comes back
+  next cycle it's least-recently-shown. `LedgerEntry.LastInjected` was
+  already tracked, already updated at injection time, for exactly this.
+
+  What shipped: `orderChronicLane` (`internal/report/report.go`) reserves one
+  chronic slot for whichever known-tic has gone longest without a real
+  injection — never-injected beats any real timestamp — and ranks every
+  other chronic entry, known or not, by rate alone. A curated word still
+  *eventually* wins the floor slot, LRU-rotated among known entries whenever
+  more than one is active; it is no longer permanently, simultaneously
+  guaranteed a slot the way three-or-fewer curated words used to get for
+  free. `running` came back out of `known-tics.txt` afterward: at the top
+  rate in the corpus it wins a slot on merit, so curating it only spent a
+  floor-protection slot on a word that never needed protecting.
 
 ## The judge — a measured reversal (the hybrid-loop seam)
 
