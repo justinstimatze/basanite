@@ -50,6 +50,7 @@ usage: basanite <command> [flags]
   refresh         regenerate the state file if stale (runs from both hooks)
   hook            UserPromptSubmit entry: inject the report
   display         MessageDisplay entry: show the demote rung instead of the tic
+  glyphs          manage the opt-in glyph table display reads (-init)
   writecheck      PreToolUse entry: name tics in text about to enter a file
   install         register the hooks in ~/.claude/settings.json (-status, -uninstall)
   ledger          flagged tics over time — is a tic's rate falling?
@@ -92,6 +93,8 @@ func main() {
 		err = runWritecheck(os.Args[2:])
 	case "display":
 		err = runDisplay(args)
+	case "glyphs":
+		err = runGlyphs(args)
 	case "ledger":
 		err = runLedger(args)
 	case "version", "--version", "-v":
@@ -901,11 +904,12 @@ func runDisplay(args []string) error {
 	fs := flag.NewFlagSet("display", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	var (
-		path   = fs.String("report", "", "report path (default: state dir)")
-		all    = fs.Bool("all", false, "swap every judged entry, not just curated known-tics")
-		extra  = fs.String("words", "", "explicit word:replacement pairs, comma-separated")
-		maxAge = fs.Duration("max-age", 7*24*time.Hour, "ignore reports older than this")
-		noLog  = fs.Bool("no-log", false, "don't record swaps to the swap ledger")
+		path       = fs.String("report", "", "report path (default: state dir)")
+		all        = fs.Bool("all", false, "swap every judged entry, not just curated known-tics")
+		extra      = fs.String("words", "", "explicit word:replacement pairs, comma-separated")
+		maxAge     = fs.Duration("max-age", 7*24*time.Hour, "ignore reports older than this")
+		noLog      = fs.Bool("no-log", false, "don't record swaps to the swap ledger")
+		glyphsFlag = fs.String("glyphs", "", "glyph table path (default: ~/.config/basanite/glyphs.txt, skipped if absent)")
 	)
 	if fs.Parse(args) != nil {
 		return nil
@@ -937,18 +941,24 @@ func runDisplay(args []string) error {
 	if *extra != "" {
 		swaps.Add(strings.Split(*extra, ","))
 	}
-	if len(swaps) == 0 {
+	if *glyphsFlag == "" {
+		*glyphsFlag = glyphsPath()
+	}
+	// Glyph mode is opt-in and file-driven, so a missing/unreadable table is
+	// silently no glyphs, same as a missing report is silently no word-swaps.
+	glyphs, _ := display.GlyphsFromFile(*glyphsFlag)
+	if len(swaps) == 0 && len(glyphs) == 0 {
 		return nil
 	}
 
 	st := loadDisplayState(in.SessionID, in.MessageID)
-	out, st, counts := swaps.Apply(in.Delta, st)
+	out, st, counts := swaps.ApplyWithGlyphs(in.Delta, st, glyphs)
 	saveDisplayState(in.SessionID, st)
 	// The transcript keeps the original word, so this log is the only record
 	// that the swap happened — and the only count that tracks what was read
 	// rather than what was written.
 	if !*noLog {
-		display.AppendLog(displayLogPath(), counts, swaps, time.Now())
+		display.AppendLog(displayLogPath(), counts, swaps, glyphs, time.Now())
 	}
 
 	var resp struct {
@@ -960,6 +970,42 @@ func runDisplay(args []string) error {
 	resp.HookSpecificOutput.HookEventName = "MessageDisplay"
 	resp.HookSpecificOutput.DisplayContent = out
 	json.NewEncoder(os.Stdout).Encode(&resp)
+	return nil
+}
+
+// runGlyphs manages the glyph table used by runDisplay's glyph mode. Unlike
+// knownTicsPath, this is never auto-seeded by a read — glyph mode is opt-in,
+// so -init is the only thing that turns it on, never a side effect of
+// running display.
+func runGlyphs(args []string) error {
+	fs := flag.NewFlagSet("glyphs", flag.ContinueOnError)
+	init := fs.Bool("init", false, "write the starter glyph table if it doesn't exist yet")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	path := glyphsPath()
+	if path == "" {
+		return fmt.Errorf("no home directory to place %s in", filepath.Join(".config", "basanite", "glyphs.txt"))
+	}
+	if !*init {
+		if _, err := os.Stat(path); err == nil {
+			fmt.Printf("glyph table: %s\n", path)
+		} else {
+			fmt.Printf("no glyph table yet — run 'basanite glyphs -init' to create one at %s\n", path)
+		}
+		return nil
+	}
+	if _, err := os.Stat(path); err == nil {
+		fmt.Printf("already exists, left untouched: %s\n", path)
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(path, []byte(display.GlyphsSeed()), 0o644); err != nil {
+		return err
+	}
+	fmt.Printf("wrote %s — yours to curate; glyph mode is on for whatever lemmas are in it\n", path)
 	return nil
 }
 
@@ -1508,6 +1554,17 @@ func knownTicsPath() string {
 		return ""
 	}
 	return filepath.Join(home, ".config", "basanite", "known-tics.txt")
+}
+
+// glyphsPath is the user-owned glyph table: ~/.config/basanite/glyphs.txt.
+// Mirrors knownTicsPath exactly, including "" with no home dir — but unlike
+// known-tics.txt this is never auto-seeded by loading it; see runGlyphs.
+func glyphsPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".config", "basanite", "glyphs.txt")
 }
 
 // applyKnownTics loads the user-owned known-tics list (seeding it on first

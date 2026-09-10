@@ -1,0 +1,23 @@
+# glyphs — the display hook's other relief mode: render a flagged tic as a
+# single symbol instead of its vetted word-swap rung. This is the *starter
+# seed*: on `basanite glyphs -init` it is copied to ~/.config/basanite/glyphs.txt,
+# and from then on that file is the only one read — it's yours to curate.
+# Unlike known-tics.txt, nothing seeds this automatically: glyph mode is
+# opt-in, and auto-seeding it would turn it on for every install unasked.
+#
+# Format: one 'lemma:glyph' pair per line, '#' comments and blank lines
+# ignored. A lemma here always renders as its glyph, never the demote-rung
+# word — it doesn't need a vetted synonym the way a word swap does, so put
+# anything here you'd rather see flagged than dressed up in a replacement
+# word.
+#
+# Symbols are plain BMP marks on purpose, not emoji: emoji render double-width
+# in some terminals and single in others (breaks column alignment), and a
+# screen reader announces one by its full Unicode name where a mark like
+# these reads tersely. Swap these for anything else you like — same rule
+# applies to your own picks.
+
+load-bearing:†
+substrate:‡
+calibration:∴
+texture:§

@@ -129,8 +129,22 @@ var (
 // Batches end on line boundaries (except a message's last), so tracking fences
 // per line is sound.
 func (s Swaps) Apply(delta string, st State) (string, State, map[string]int) {
+	return s.apply(delta, st, nil)
+}
+
+// ApplyWithGlyphs is Apply plus glyph mode: a lemma present in g always
+// renders as its glyph, never its word-swap rung — see swapWords. Same
+// 3-tuple as Apply; which lemmas in the returned counts came from a glyph
+// hit is recoverable after the fact by checking membership in g itself
+// (glyph wins unconditionally, so a lemma present in g is never reached via
+// the word-swap path), which is what AppendLog does.
+func (s Swaps) ApplyWithGlyphs(delta string, st State, g Glyphs) (string, State, map[string]int) {
+	return s.apply(delta, st, g)
+}
+
+func (s Swaps) apply(delta string, st State, g Glyphs) (string, State, map[string]int) {
 	counts := map[string]int{}
-	if len(s) == 0 || delta == "" {
+	if (len(s) == 0 && len(g) == 0) || delta == "" {
 		return delta, st, counts
 	}
 	lines := strings.Split(delta, "\n")
@@ -142,22 +156,22 @@ func (s Swaps) Apply(delta string, st State) (string, State, map[string]int) {
 		if st.InFence {
 			continue
 		}
-		lines[i] = s.applyLine(line, counts)
+		lines[i] = s.applyLine(line, counts, g)
 	}
 	return strings.Join(lines, "\n"), st, counts
 }
 
 // applyLine swaps outside the protected spans of a single prose line.
-func (s Swaps) applyLine(line string, counts map[string]int) string {
+func (s Swaps) applyLine(line string, counts map[string]int, g Glyphs) string {
 	spans := protected.FindAllStringIndex(line, -1)
 	var b strings.Builder
 	last := 0
 	for _, sp := range spans {
-		b.WriteString(s.swapWords(line[last:sp[0]], counts))
+		b.WriteString(s.swapWords(line[last:sp[0]], counts, g))
 		b.WriteString(line[sp[0]:sp[1]]) // verbatim
 		last = sp[1]
 	}
-	b.WriteString(s.swapWords(line[last:], counts))
+	b.WriteString(s.swapWords(line[last:], counts, g))
 	return b.String()
 }
 
@@ -165,12 +179,23 @@ func (s Swaps) applyLine(line string, counts map[string]int) string {
 // the tics that most want swapping are compounds like "load-bearing".
 var wordish = regexp.MustCompile(`[\p{L}][\p{L}'-]*`)
 
-func (s Swaps) swapWords(line string, counts map[string]int) string {
+func (s Swaps) swapWords(line string, counts map[string]int, g Glyphs) string {
 	if line == "" {
 		return line
 	}
 	return wordish.ReplaceAllStringFunc(line, func(w string) string {
 		surface := strings.ToLower(w)
+		// The lemma is computed unconditionally, before any table lookup,
+		// so a glyph check can run ahead of s[surface]'s fast path. s[surface]
+		// hits and returns immediately for a tic typed in its own base form
+		// ("load-bearing"), which is the common case — a glyph check placed
+		// only inside the lemma-computed branch below would never see it.
+		lemma := text.Lemma(surface)
+		if gl, ok := g[lemma]; ok {
+			// A glyph is a mark, not a word: no case-matching, no inflection.
+			counts[lemma]++
+			return gl
+		}
 		if rep, ok := s[surface]; ok {
 			counts[surface]++
 			return matchCase(w, rep)
@@ -181,7 +206,6 @@ func (s Swaps) swapWords(line string, counts map[string]int) string {
 		// surface meant the swap fired on the singular and silently passed
 		// over every plural — including "arms", which is the form the lean
 		// actually takes.
-		lemma := text.Lemma(surface)
 		if lemma == surface {
 			return w
 		}

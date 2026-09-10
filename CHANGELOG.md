@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.12.0 (2026-09-10) — a mark instead of a word
+
+The demote rung `display` swaps in is a real word, chosen to still read as a
+sentence — which means it inherits a word choice's failure mode: right for
+most sentences, occasionally wrong for the one in front of you. A glyph
+doesn't have that problem, because it isn't trying to be a synonym at all.
+
+- **`basanite glyphs -init`** seeds `~/.config/basanite/glyphs.txt`, a
+  `lemma:glyph` table `display` checks ahead of the word-swap rung — a lemma
+  in it always renders as its symbol, never its demote rung, and needs no
+  vetted substitute the way a word-swap does. Off by default: nothing seeds
+  or reads this file until you ask it to, so an existing install's output is
+  unchanged until you opt in.
+- Starter table covers the four single-word seeded known-tics
+  (`load-bearing:†`, `substrate:‡`, `calibration:∴`, `texture:§`), plain BMP
+  marks rather than emoji — emoji disagree with terminals on column width and
+  read out by full Unicode name to a screen reader, a glyph mode built to be
+  glanceable shouldn't cost either.
+- `swaps.jsonl` gains a `mode` field (`"glyph"` when set, empty for a
+  word-swap, so every existing line still parses) — `basanite ledger -swaps`
+  can tell the two apart without re-deriving it.
+
 ## v0.11.0 (2026-08-28) — a second caller without a second seen-set
 
 writecheck's dedup assumed it was the only caller ever marking a word seen

@@ -168,3 +168,68 @@ func TestEmptyTableIsIdentity(t *testing.T) {
 		t.Errorf("no swaps must mean no change, got %q", got)
 	}
 }
+
+// The case the glyph-check ordering exists for: a tic typed in its own base
+// form ("load-bearing") hits the fast s[surface] path before swapWords ever
+// computes a lemma. A glyph check placed only inside the lemma-computed
+// branch would never see this — the common case — so the glyph lookup has
+// to run before any s[...] lookup, not after it misses.
+func TestGlyphWinsOverWordSwapForSameLemma(t *testing.T) {
+	s := swaps() // "load-bearing": "supporting"
+	g := Glyphs{"load-bearing": "†"}
+	got, _, counts := s.ApplyWithGlyphs("This check is load-bearing.", State{}, g)
+	if want := "This check is †."; got != want {
+		t.Errorf("base-form glyph: got %q, want %q", got, want)
+	}
+	if counts["load-bearing"] != 1 {
+		t.Errorf("glyph hit must still count: %v", counts)
+	}
+	// An inflected surface must resolve to the same lemma and still glyph.
+	got, _, _ = Swaps{"arm": "branch"}.ApplyWithGlyphs("Both arms held.", State{}, Glyphs{"arm": "※"})
+	if want := "Both ※ held."; got != want {
+		t.Errorf("inflected-surface glyph: got %q, want %q", got, want)
+	}
+}
+
+// A glyph is a mark, not a word: no plural agreement, no capitalization
+// carried over. This is the opposite of matchCase/inflect's job for a real
+// word-swap replacement.
+func TestGlyphSkipsInflectionAndCaseMatching(t *testing.T) {
+	g := Glyphs{"substrate": "‡"}
+	got, _, _ := Swaps{}.ApplyWithGlyphs("SUBSTRATE and substrates.", State{}, g)
+	if want := "‡ and ‡."; got != want {
+		t.Errorf("got %q, want %q — a glyph must not inherit case or plural suffix", got, want)
+	}
+}
+
+// Glyph mode reuses the same fence/protected-span walk as word-swap — this
+// locks that in rather than trusting it stays true by construction.
+func TestGlyphRespectsFencesAndProtectedSpans(t *testing.T) {
+	g := Glyphs{"substrate": "‡"}
+	got, _, _ := Swaps{}.ApplyWithGlyphs("The `substrate` field is on the substrate.", State{}, g)
+	if !strings.Contains(got, "`substrate`") {
+		t.Errorf("inline code was glyphed: %q", got)
+	}
+	if !strings.Contains(got, "on the ‡.") {
+		t.Errorf("prose outside the protected span should still glyph: %q", got)
+	}
+	first, st, _ := (Swaps{}).ApplyWithGlyphs("```go", State{}, g)
+	if !st.InFence {
+		t.Fatal("opening fence must be recorded")
+	}
+	second, _, _ := (Swaps{}).ApplyWithGlyphs(`x := "substrate"`, st, g)
+	if second != `x := "substrate"` || first != "```go" {
+		t.Errorf("code inside a carried-over fence was glyphed: %q / %q", first, second)
+	}
+}
+
+// Apply itself (not ApplyWithGlyphs) must be untouched by this feature,
+// including when called with a nil glyph table explicitly.
+func TestApplyUnchangedWhenNoGlyphsGiven(t *testing.T) {
+	s := swaps()
+	want, _, _ := s.Apply("Load-bearing checks sit on the substrate.", State{})
+	got, _, _ := s.ApplyWithGlyphs("Load-bearing checks sit on the substrate.", State{}, nil)
+	if got != want {
+		t.Errorf("ApplyWithGlyphs(nil) must match Apply exactly: got %q, want %q", got, want)
+	}
+}

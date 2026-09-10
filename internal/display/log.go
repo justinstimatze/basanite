@@ -22,6 +22,7 @@ type Swap struct {
 	Lemma string    `json:"w"`
 	To    string    `json:"to"`
 	Count int       `json:"n"`
+	Mode  string    `json:"mode,omitempty"` // "glyph"; empty means word-swap, so old lines still parse
 }
 
 // AppendLog records one batch's swaps. Append-only JSONL because the hook runs
@@ -29,7 +30,14 @@ type Swap struct {
 // from interleaving mid-line, and a torn or malformed line costs one record
 // rather than the file. Best-effort — a logging failure must never garble the
 // terminal, which is what returning an error here would risk.
-func AppendLog(path string, counts map[string]int, swaps Swaps, now time.Time) {
+//
+// glyphs may be nil (word-swap only, the pre-glyph-mode behavior). Which
+// lemmas in counts came from a glyph hit needs no separate bookkeeping: glyph
+// wins unconditionally over a word-swap rung for the same lemma (see
+// swapWords), so a lemma present in glyphs was never reached via swaps at
+// all — checking membership is sufficient to know which table to read To
+// from and whether to record Mode.
+func AppendLog(path string, counts map[string]int, swaps Swaps, glyphs Glyphs, now time.Time) {
 	if len(counts) == 0 || path == "" {
 		return
 	}
@@ -45,7 +53,11 @@ func AppendLog(path string, counts map[string]int, swaps Swaps, now time.Time) {
 	sort.Strings(lemmas) // deterministic line order within a batch
 	var b strings.Builder
 	for _, l := range lemmas {
-		line, err := json.Marshal(Swap{At: now, Lemma: l, To: swaps[l], Count: counts[l]})
+		to, mode := swaps[l], ""
+		if gl, ok := glyphs[l]; ok {
+			to, mode = gl, "glyph"
+		}
+		line, err := json.Marshal(Swap{At: now, Lemma: l, To: to, Count: counts[l], Mode: mode})
 		if err != nil {
 			continue
 		}

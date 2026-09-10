@@ -333,6 +333,38 @@ That count deliberately does not match `trend` or `ledger`, which read the
 transcripts and report what was *written*. The gap between the two is the
 display hook doing its job. Use `-no-log` to turn the recording off.
 
+### A mark instead of a word (`glyphs`)
+
+The demote rung above is a real word, chosen to still read as a sentence —
+which means it can still be *wrong*, the way any word choice can be. A glyph
+sidesteps that: instead of "supporting", you see `†`. It doesn't try to be a
+synonym, so there's no substitute to get wrong, and it reads unmistakably as
+"flagged" rather than as a slightly odd sentence.
+
+It's opt-in and off by default — `display` looks for
+`~/.config/basanite/glyphs.txt` and does nothing if it isn't there:
+
+```
+$ basanite glyphs -init
+wrote ~/.config/basanite/glyphs.txt — yours to curate; glyph mode is on for whatever lemmas are in it
+```
+
+The starter table covers the seeded single-word known-tics
+(`load-bearing:†`, `substrate:‡`, `calibration:∴`, `texture:§`) — one
+`lemma:glyph` pair per line, `#` comments and blank lines ignored, same shape
+as `known-tics.txt`. A lemma in the table always renders as its glyph, never
+its word-swap rung, and it doesn't need to be on the curated known-tics list
+or have a vetted rung at all — put anything here you'd rather see flagged
+than dressed up in a replacement word. It can't cover the phrase entries
+(`you're absolutely right`, `worth noting`) — those need a multi-word
+matcher `display` doesn't have; the word-swap path can't reach them either.
+
+Pick plain symbols, not emoji. Emoji render double-width in some terminals
+and single-width in others, which breaks column alignment mid-line, and a
+screen reader announces one by its full Unicode name where a mark like `†`
+reads tersely. `-glyphs <path>` points at a different table if you'd rather
+keep it somewhere else.
+
 ### Knowing whether it works
 
 The transcripts are the longitudinal record, so the intervention is

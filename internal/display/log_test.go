@@ -19,9 +19,9 @@ func TestLogRoundTripAndTolerance(t *testing.T) {
 	}
 	s := swaps()
 	now := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
-	AppendLog(path, map[string]int{"load-bearing": 2, "substrate": 1}, s, now)
-	AppendLog(path, map[string]int{"load-bearing": 1}, s, now.Add(24*time.Hour))
-	AppendLog(path, nil, s, now) // nothing swapped: writes nothing
+	AppendLog(path, map[string]int{"load-bearing": 2, "substrate": 1}, s, nil, now)
+	AppendLog(path, map[string]int{"load-bearing": 1}, s, nil, now.Add(24*time.Hour))
+	AppendLog(path, nil, s, nil, now) // nothing swapped: writes nothing
 
 	f, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
 	f.WriteString("{ this is not json\n")
@@ -36,6 +36,26 @@ func TestLogRoundTripAndTolerance(t *testing.T) {
 	}
 	if got[0].Lemma != "load-bearing" || got[0].To != "supporting" || got[0].Count != 2 {
 		t.Errorf("first record lost detail: %+v", got[0])
+	}
+}
+
+// A glyph-sourced lemma must round-trip with Mode == "glyph" and To == the
+// glyph, not the word-swap rung — even when the lemma also has one, since
+// glyph wins unconditionally and swaps[l] is never the source of truth once
+// glyphs[l] exists.
+func TestLogRecordsGlyphMode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), LogName)
+	s := swaps() // has "load-bearing": "supporting"
+	g := Glyphs{"load-bearing": "†"}
+	now := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
+	AppendLog(path, map[string]int{"load-bearing": 1}, s, g, now)
+
+	got, err := LoadLog(path)
+	if err != nil || len(got) != 1 {
+		t.Fatalf("want 1 record, got %v err=%v", got, err)
+	}
+	if got[0].Mode != "glyph" || got[0].To != "†" {
+		t.Errorf("glyph swap logged wrong: %+v", got[0])
 	}
 }
 
