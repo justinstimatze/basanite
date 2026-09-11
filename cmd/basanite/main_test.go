@@ -537,3 +537,128 @@ func TestPruneMarkersSweepsWritecheckSeenFiles(t *testing.T) {
 		}
 	}
 }
+
+// runCheckCapture runs runCheck with os.Stdout swapped, mirroring
+// runWritecheckCapture — runCheck writes its result with fmt.Printf against
+// the real os.Stdout, same as every other hot-path command in this file.
+func runCheckCapture(t *testing.T, args []string) (string, error) {
+	t.Helper()
+	outR, outW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldOut := os.Stdout
+	os.Stdout = outW
+	runErr := runCheck(args)
+	os.Stdout = oldOut
+	outW.Close()
+	out, err := io.ReadAll(outR)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(out), runErr
+}
+
+func saveCheckReport(t *testing.T) {
+	t.Helper()
+	rep := &report.Report{
+		GeneratedAt: time.Now(),
+		Entries: []report.Entry{
+			{Lemma: "load-bearing", Known: true, DemoteTo: "supporting"},
+		},
+	}
+	path, err := report.Path()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rep.Save(path); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRunCheckFlagsAKnownTicInAFile(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	saveCheckReport(t)
+
+	f := filepath.Join(t.TempDir(), "draft.md")
+	if err := os.WriteFile(f, []byte("This fix is load-bearing."), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runCheckCapture(t, []string{f})
+	if err != nil {
+		t.Fatalf("runCheck(%v) = %v, want nil", f, err)
+	}
+	if !strings.Contains(out, "load-bearing") || !strings.Contains(out, "supporting") {
+		t.Errorf("expected the flagged word and its rung in output, got %q", out)
+	}
+	if strings.Contains(out, "hookSpecificOutput") {
+		t.Errorf("check must not emit the hook JSON envelope: %q", out)
+	}
+}
+
+func TestRunCheckReadsStdin(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	saveCheckReport(t)
+
+	inR, inW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		inW.WriteString("This fix is load-bearing.")
+		inW.Close()
+	}()
+	oldIn := os.Stdin
+	os.Stdin = inR
+	out, runErr := runCheckCapture(t, []string{"-"})
+	os.Stdin = oldIn
+	if runErr != nil {
+		t.Fatalf("runCheck([-]) = %v, want nil", runErr)
+	}
+	if !strings.Contains(out, "load-bearing") {
+		t.Errorf("stdin content was not checked: %q", out)
+	}
+}
+
+func TestRunCheckExitsNonzeroOnMissingReport(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	f := filepath.Join(t.TempDir(), "draft.md")
+	if err := os.WriteFile(f, []byte("anything"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runCheckCapture(t, []string{f}); err == nil {
+		t.Error("runCheck with no report yet should error, got nil")
+	}
+}
+
+func TestRunCheckExitsNonzeroOnUnreadableFile(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	saveCheckReport(t)
+	if _, err := runCheckCapture(t, []string{filepath.Join(t.TempDir(), "does-not-exist.md")}); err == nil {
+		t.Error("runCheck on a missing file should error, got nil")
+	}
+}
+
+func TestRunCheckExitsNonzeroWithNoFileArgument(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	saveCheckReport(t)
+	if _, err := runCheckCapture(t, nil); err == nil {
+		t.Error("runCheck with no file argument should error, got nil")
+	}
+}
+
+func TestRunCheckCleanTextReportsNothingFlagged(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	saveCheckReport(t)
+	f := filepath.Join(t.TempDir(), "draft.md")
+	if err := os.WriteFile(f, []byte("Nothing tic-worthy in here."), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runCheckCapture(t, []string{f})
+	if err != nil {
+		t.Fatalf("runCheck(%v) = %v, want nil", f, err)
+	}
+	if !strings.Contains(out, "clean") {
+		t.Errorf("expected a clean-text message, got %q", out)
+	}
+}

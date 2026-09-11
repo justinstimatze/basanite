@@ -3,6 +3,14 @@
 *Untracked note, written 2026-09-03 from costrel's session. Commit it,
 gitignore it, or delete it — nothing depends on it.*
 
+**Shipped 2026-09-10, as `basanite check <file>|-`** — the exact shape this
+note asks for below: no `writecheckInput` envelope, no `session_id`, no
+dedup, a stale or missing report reported loudly instead of the silent
+`return nil` this note is about. `cmd/basanite/main.go`'s `runCheck`; see
+`CHANGELOG.md` v0.14.0 and `README.md`'s command table. The narrative below
+is the investigation and design that produced it, kept as the record —
+still accurate about the gap as it stood on 2026-09-03/09-06.
+
 ## What happened
 
 Tried to run a draft README through `basanite writecheck` outside a real
@@ -25,7 +33,7 @@ payload shape, content deliberately containing `load-bearing` and
 nothing. Only after reading `runWritecheck`'s source to find the missing
 `session_id` requirement did the positive control actually fire.
 
-## Why this is a real gap, not user error
+## Why this is a real gap
 
 `writecheck`'s fail-open design is correct for its actual job — a hook
 standing in front of every write has no business failing loudly, and the
@@ -53,7 +61,8 @@ uses, but:
   block by complaining
 
 This is close to what `writecheck -no-dedup` already does internally; the
-gap is entirely in the input contract, not the detection logic.
+gap sits entirely in the input contract — the detection logic underneath is
+already right.
 
 ## Confirmed independently, 2026-09-06
 
@@ -61,9 +70,9 @@ Asked (from a session on afferent, github.com/justinstimatze/afferent) to run
 that project's 5 tracked `.md` files through both cope and basanite. cope-gate
 has exactly this shape already (`-check <file>`, or `-` for stdin) and it
 worked immediately. Reached for the basanite equivalent and hit this same gap
-from scratch, independently of this note — a second, unrelated project asking
-for the identical thing three days later is real signal that this is a
-recurring need, not a one-off from costrel's session.
+from scratch, independently of this note — two independent sessions hitting
+the identical gap within three days of each other is real signal that this
+is a recurring need.
 
 Also: the installed binary (`~/Documents/basanite/basanite`, built 2026-06-10)
 predates `writecheck` entirely (`unknown command "writecheck"`) — main.go

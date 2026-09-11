@@ -27,6 +27,8 @@ basanite report          # full pipeline (scan→vet→ladder) → state file, ~
 basanite refresh         # regenerate the state file if stale (runs from both hooks)
 basanite hook            # UserPromptSubmit entry: inject the report, ~4 ms
 basanite display         # MessageDisplay entry: show the demote rung instead of the tic
+basanite glyphs -init    # write ~/.config/basanite/glyphs.txt, the opt-in mark-instead-of-word table
+basanite check <file>|-  # ad hoc: name the tics in a file or piped text, no hook envelope
 basanite writecheck      # PreToolUse entry: name tics in text about to enter a file, or a Linear
                          #   ticket, document, or status update
 basanite ledger          # flagged tics over time — is a tic's rate falling, and did it ever reach a prompt?
@@ -121,7 +123,7 @@ target in up to 50 real uses (evenly sampled over the window, deduped),
 substitute the candidate, and compare GloVe mean-pooled sentence vectors. A
 candidate that preserves the vector across most uses is a true replacement
 in your idiolect; wrong-sense artifacts wobble and self-eliminate.
-Out-of-vocabulary candidates are skipped, not scored — an OOV substitution
+Out-of-vocabulary candidates are skipped rather than scored — scoring one
 would earn a free near-1 cosine.
 
 The same pass classifies signature vs tic for free: the mean pairwise cosine
@@ -193,7 +195,7 @@ with a per-sense note. The fence is [stull](https://github.com/justinstimatze/st
 
 It runs **by default when a key is configured** — the deterministic-only
 report is the one that confidently mis-suggests synonyms for terms of art
-(`hook → snare`), so the judge is the default experience, not an add-on. It
+(`hook → snare`), so the judge is what runs by default. It
 needs `ANTHROPIC_API_KEY` (in the environment or a `.env` — see
 `.env.example`), runs at report time (not per turn), and uses a cheap model
 with prompt caching. Without a key it falls back to deterministic rather than
@@ -231,7 +233,7 @@ feeds two things:
   awareness-only entries — there's no synonym ladder for a stock phrase, just
   the awareness that you keep reaching for it.
 
-It stays a reference, not a denylist: a seeded entry only surfaces when
+It behaves as a reference: a seeded entry only surfaces when
 you're actually leaning on it now. And it's a *seed*, not a baked-in list —
 on first run the starter set is written to `~/.config/basanite/known-tics.txt`,
 and from then on that file is the only one read. It's yours to curate: add
@@ -251,11 +253,11 @@ per session, and treats every abnormal case — missing report, stale report,
 no session id — as silent success. It never touches the corpus, WordNet, or
 vectors, and never blocks a prompt.
 
-The injection is **awareness, not prohibition** — never "don't say X":
+The injection stays **awareness** — never "don't say X":
 naming a word in order to suppress it tends to prime it instead
 ([ironic process theory](https://en.wikipedia.org/wiki/Ironic_process_theory)).
-The ladder reads weakest → strongest so the move can be *demote*, not just
-swap.
+The ladder reads weakest → strongest so the move can be *demote*, rather
+than a same-strength swap.
 
 The console `report` view shows every entry; the **injection is budgeted** to
 5 words and 2 phrases (`hook -top-words` / `-top-phrases`; 0 = uncapped),
@@ -295,7 +297,7 @@ the text streaming to your terminal. You read `supporting`; the model wrote
 It is **display-only, by design of the event**: the transcript and the model's
 own context keep the original word. Two consequences worth being clear about.
 The model never sees the swap, so this changes nothing about what it writes —
-it is relief, not intervention. And because `report`, `trend` and `ledger` all
+it is relief. And because `report`, `trend` and `ledger` all
 read the transcripts, the measurement stays honest no matter what the screen
 shows: the rate you're told is the rate that was written.
 
@@ -318,9 +320,13 @@ the weaker word.
   (tracked across streamed batches) are never rewritten, so what you copy is
   what was written. Stock phrases are never swapped — they carry no ladder.
 
-Claude Code holds each batch of lines until the hook returns, so it runs in
+Claude Code holds each streamed batch until the hook returns, so it runs in
 ~4 ms and treats every abnormal case as silent success; on any error the
-original text is displayed.
+original text is displayed. Batches are not line-aligned — a tic or a fence
+marker can land split across two of them — so an incomplete line is held
+back and released once it's whole, rather than ever swapping inside a
+fragment. The tradeoff: a long line streamed across many small batches with
+no newline in it displays nothing until one arrives, or the message ends.
 
 Every swap is recorded to `swaps.jsonl` in the state dir, since the transcript
 keeps the original and nothing else would know it happened:
@@ -362,9 +368,13 @@ The starter table covers the seeded single-word known-tics
 as `known-tics.txt`. A lemma in the table always renders as its glyph, never
 its word-swap rung, and it doesn't need to be on the curated known-tics list
 or have a vetted rung at all — put anything here you'd rather see flagged
-than dressed up in a replacement word. It can't cover the phrase entries
-(`you're absolutely right`, `worth noting`) — those need a multi-word
-matcher `display` doesn't have; the word-swap path can't reach them either.
+than dressed up in a replacement word.
+
+A line whose left side has a space in it is a phrase (`worth noting:∴`),
+matched case-insensitively against a whole line at a time — the one thing
+word-swap can never do, since a stock phrase has no ladder. Matching is
+single-line only: a phrase split across two streamed lines isn't seen whole
+and isn't matched, a deliberate limitation rather than a silent gap.
 
 Pick plain symbols, not emoji. Emoji render double-width in some terminals
 and single-width in others, which breaks column alignment mid-line, and a
@@ -528,8 +538,8 @@ Nothing is redistributed in this repository. The binary looks for assets in
 - The judge is an LLM and is not deterministic across prompt wording —
   tuning it to fix one word can perturb another (observed: a prompt edit to
   catch project-name proper nouns regressed `local`). `temperature: 0`
-  makes a *cached* verdict stable, but the judgment remains a model call,
-  not a proof. Project-name proper nouns are handled deterministically by
+  makes a *cached* verdict stable, but the judgment is still a model call
+  rather than a proof. Project-name proper nouns are handled deterministically by
   `proper-nouns.txt`, not by the model.
 - The chronic stage needs frame, rarity, or known-tics evidence; a chronic
   tic that is a common English word, used without a repeating frame and not

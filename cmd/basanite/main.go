@@ -51,6 +51,7 @@ usage: basanite <command> [flags]
   hook            UserPromptSubmit entry: inject the report
   display         MessageDisplay entry: show the demote rung instead of the tic
   glyphs          manage the opt-in glyph table display reads (-init)
+  check <file>/-  ad hoc check: name the tics in a file or piped text, no hook envelope
   writecheck      PreToolUse entry: name tics in text about to enter a file
   install         register the hooks in ~/.claude/settings.json (-status, -uninstall)
   ledger          flagged tics over time — is a tic's rate falling?
@@ -89,6 +90,8 @@ func main() {
 		err = runAudit(args)
 	case "install":
 		err = runInstall(args)
+	case "check":
+		err = runCheck(args)
 	case "writecheck":
 		err = runWritecheck(os.Args[2:])
 	case "display":
@@ -919,9 +922,14 @@ func runDisplay(args []string) error {
 		SessionID string `json:"session_id"`
 		MessageID string `json:"message_id"`
 		Delta     string `json:"delta"`
+		Final     bool   `json:"final"`
 	}
-	if json.NewDecoder(os.Stdin).Decode(&in) != nil || in.Delta == "" {
-		return nil // nothing to render: leave the original alone
+	// A final batch's delta is routinely empty — Claude Code sends it to mark
+	// the message done, not to carry text — and that batch still has to reach
+	// SplitPending below to flush whatever it's holding from the last one.
+	// Only a non-final empty delta is genuinely nothing to render.
+	if json.NewDecoder(os.Stdin).Decode(&in) != nil || (in.Delta == "" && !in.Final) {
+		return nil
 	}
 
 	if *path == "" {
@@ -952,7 +960,15 @@ func runDisplay(args []string) error {
 	}
 
 	st := loadDisplayState(in.SessionID, in.MessageID)
-	out, st, counts := swaps.ApplyWithGlyphs(in.Delta, st, glyphs)
+	// Batches are not line-aligned, so a tic or a fence marker can land split
+	// across two deltas. SplitPending buffers the unresolved tail in
+	// st.Pending and only ever hands Apply/ApplyWithGlyphs complete lines —
+	// safe is "" while a line is still incomplete, which suppresses this
+	// batch's display until the rest of the line arrives. See SplitPending's
+	// own doc comment for the latency tradeoff this costs.
+	safe, pending := display.SplitPending(in.Delta, st.Pending, in.Final)
+	st.Pending = pending
+	out, st, counts := swaps.ApplyWithGlyphs(safe, st, glyphs)
 	saveDisplayState(in.SessionID, st)
 	// The transcript keeps the original word, so this log is the only record
 	// that the swap happened — and the only count that tracks what was read
@@ -1196,6 +1212,106 @@ func runWritecheck(args []string) error {
 	resp.HookSpecificOutput.HookEventName = "PreToolUse"
 	resp.HookSpecificOutput.AdditionalContext = b.String()
 	json.NewEncoder(os.Stdout).Encode(&resp)
+	return nil
+}
+
+// runCheck is the ad hoc CLI entry point: check a real file or stdin text
+// for the same curated tics writecheck watches for, without needing to fake
+// a PreToolUse hook envelope. Documented as a real gap twice
+// (NOTES-writecheck-cli-silent-failure-2026-09-03.md, and independently by
+// a second, unrelated project three days later) — writecheck only accepts
+// the full JSON envelope on stdin, so checking an arbitrary file meant
+// hand-building a fake hook payload.
+//
+// Unlike writecheck, this has no tool call it could block by complaining,
+// so it has no reason to fail as silently as the hook does: a bad or
+// missing file argument, an unreadable file, and a missing or stale report
+// all report to stderr and exit nonzero (main()'s standard error path — see
+// its switch). No session_id, no seen-set dedup (every currently flagged
+// word in the text prints every run, matching writecheck -no-dedup's
+// behavior), no hookSpecificOutput/additionalContext envelope — a human is
+// running this directly, so the output is the plain message body.
+func runCheck(args []string) error {
+	fs := flag.NewFlagSet("check", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	var (
+		path   = fs.String("report", "", "report path (default: state dir)")
+		all    = fs.Bool("all", false, "flag every judged entry, not just curated known-tics")
+		maxAge = fs.Duration("max-age", 7*24*time.Hour, "reject a report older than this")
+	)
+	if fs.Parse(args) != nil {
+		return nil
+	}
+	rest := fs.Args()
+	if len(rest) == 0 {
+		return fmt.Errorf("usage: basanite check <file>|-")
+	}
+	arg := rest[0]
+
+	var body []byte
+	var err error
+	label := arg
+	if arg == "-" {
+		body, err = io.ReadAll(os.Stdin)
+		label = "stdin"
+	} else {
+		body, err = os.ReadFile(arg)
+	}
+	if err != nil {
+		return fmt.Errorf("reading %s: %w", label, err)
+	}
+
+	if *path == "" {
+		p, perr := report.Path()
+		if perr != nil {
+			return fmt.Errorf("no report path: %w", perr)
+		}
+		*path = p
+	}
+	rep, err := report.Load(*path)
+	if err != nil {
+		return fmt.Errorf("loading report: %w", err)
+	}
+	if rep == nil {
+		return fmt.Errorf("no report yet — run 'basanite report' first")
+	}
+	// The same plain age check writecheck applies, loud instead of silent.
+	// staleReason answers a stricter, different question — whether the
+	// background refresh should rebuild this — and would reject a report
+	// this command's own callers (writecheck, display) accept fine, e.g. one
+	// generated moments before known-tics.txt happened to be edited.
+	if age := time.Since(rep.GeneratedAt); age > *maxAge {
+		return fmt.Errorf("report is %s old, older than -max-age %s — run 'basanite report' to refresh", age.Round(time.Second), *maxAge)
+	}
+
+	swaps := display.FromReportForDetection(rep, *all)
+	if len(swaps) == 0 {
+		fmt.Printf("basanite check: %s — no curated tics to check against\n", label)
+		return nil
+	}
+	// Same detection pass writecheck uses: Apply already skips fenced blocks
+	// and protected spans and matches inflected forms against the lemma
+	// table. The rewritten text is thrown away — check never edits anything.
+	_, _, counts := swaps.Apply(string(body), display.State{})
+	if len(counts) == 0 {
+		fmt.Printf("basanite check: %s — clean, nothing flagged\n", label)
+		return nil
+	}
+
+	words := make([]string, 0, len(counts))
+	for w := range counts {
+		words = append(words, w)
+	}
+	sort.Slice(words, func(i, j int) bool { return counts[words[i]] > counts[words[j]] })
+
+	fmt.Printf("basanite — words you lean on, in %s (awareness, not prohibition):\n", label)
+	for _, w := range words {
+		if rep := swaps[w]; rep != "" {
+			fmt.Printf("  %s ×%d → %s\n", w, counts[w], rep)
+		} else {
+			fmt.Printf("  %s ×%d (no clean substitute)\n", w, counts[w])
+		}
+	}
 	return nil
 }
 

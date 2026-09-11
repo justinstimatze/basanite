@@ -1,5 +1,38 @@
 # Changelog
 
+## v0.14.0 (2026-09-10) — three deferred gaps, closed
+
+Three gaps named and set aside earlier today while building glyph mode and
+the chronic-lane fix, plus one gap that had sat in the repo since
+2026-09-03 — closed together since none of the three touch the same code.
+
+- **`display.Apply` no longer assumes line-aligned batching.** Claude Code's
+  own hooks docs say plainly not to: batches "are not line-aligned," and a
+  final batch's delta is routinely empty when a message ends on a newline.
+  `SplitPending` (`internal/display/pending.go`) buffers a delta's
+  unresolved tail in the new `State.Pending` field and only ever hands
+  `Apply`/`ApplyWithGlyphs` complete lines, so a tic or a fence marker split
+  across two streamed deltas resolves correctly instead of missing the swap
+  (word) or leaking a swap into what looked like code (fence).
+  `runDisplay`'s stdin envelope gained the `final` field this required, and
+  a guard that would otherwise have dropped whatever was buffered — on
+  exactly the routine empty-final-delta case the docs describe — got fixed
+  alongside it.
+- **Glyph mode covers phrases, not just the four single-word tics.** A
+  phrase entry in `glyphs.txt` (a space in the key, e.g. `worth noting:∴`)
+  now renders as its glyph — `phraseGlyphs`/`applyPhraseGlyphs`
+  (`internal/display/phrase_glyph.go`) match case-insensitively within one
+  already-safe line, respecting the same fence and protected-span rules
+  word-glyphing already does. A phrase split across two lines is a known,
+  deliberate limitation rather than a silent gap — locked in by a test.
+- **`basanite check <file>|-`** checks a real file or piped text against
+  the curated tics without faking a PreToolUse envelope — the gap
+  `NOTES-writecheck-cli-silent-failure-2026-09-03.md` named twice. Unlike
+  `writecheck`, it has no tool call to avoid blocking: a bad file argument,
+  an unreadable file, and a missing or stale report all report to stderr
+  and exit nonzero. No session dedup, no JSON envelope — plain text, for a
+  human running it directly.
+
 ## v0.13.0 (2026-09-10) — the list outgrew the slots
 
 Curating a 4th known-tic (`running`, the corpus's top full-window rate)
@@ -11,9 +44,9 @@ invisible to every automatic route; it lost its slot on a rate coincidence
 against a newer curated word, with nothing distinguishing that from "arm's
 lean actually faded."
 
-- **The chronic lane's known-first partition is gone.** It was a total
-  order, not a tiebreak — three curated words could take every chronic slot
-  regardless of a fourth's rate. `orderChronicLane`
+- **The chronic lane's known-first partition is gone.** It ranked curated
+  status above rate unconditionally — three curated words could take every
+  chronic slot regardless of a fourth's rate. `orderChronicLane`
   (`internal/report/report.go`) replaces it: one floor slot for whichever
   known-tic has gone longest without a real injection (never-injected beats
   any real timestamp, via `LedgerEntry.LastInjected` — already tracked,
@@ -304,17 +337,18 @@ happening and no surface said so, which is the same reason the audit exists.
   and "the other arm"; the one form that would have swapped is the one that
   rarely appears. Replacements now take the original's ending, with the
   replacement's own spelling deciding the suffix (`arms` -> `branches`).
-- **Names are detected, not listed.** A project or product name reaches the
-  chronic route looking exactly like a lean: steady rate, wide dispersion, an
-  ordinary English ladder. The only defense was a hand-written
-  `proper-nouns.txt`, and the judge — told outright that a product name is a
-  term of art — called `chrome` a filler adjective meaning shiny and wrote a
-  confident paragraph on why. What separates them is how the corpus writes the
-  word. Measured across ~120 judged words in 90 days: seven names landed
-  between 65% and 98% title-cased mid-sentence, the highest ordinary word was
-  31%, and nothing fell in between. Real leans sit at the bottom — `surface`
-  0.5%, `arm` 0.9%, `substrate` 1.7%. The scan now checks that before spending
-  a judge call, and the curated list demotes to an override for what the rate
+- **Capitalization rate now does what the list alone couldn't.** A project or
+  product name reaches the chronic route looking exactly like a lean: steady
+  rate, wide dispersion, an ordinary English ladder. The only defense was a
+  hand-written `proper-nouns.txt`, and the judge — told outright that a
+  product name is a term of art — called `chrome` a filler adjective meaning
+  shiny and wrote a confident paragraph on why. What separates them is how
+  the corpus writes the word. Measured across ~120 judged words in 90 days:
+  seven names landed between 65% and 98% title-cased mid-sentence, the
+  highest ordinary word was 31%, and nothing fell in between. Real leans sit
+  at the bottom — `surface` 0.5%, `arm` 0.9%, `substrate` 1.7%. The scan now
+  checks that before spending a judge call, and the curated list demotes to
+  an override for what the rate
   misses (an all-caps ticket prefix; a name that is also a common word).
 - **The report refreshes on a clock that actually ticks.** The staleness check
   ran only at `SessionStart`, which for a session left open across days is
@@ -323,10 +357,11 @@ happening and no surface said so, which is the same reason the audit exists.
   It now also runs on `UserPromptSubmit`, where the binary is invoked every
   prompt anyway: a stat and two comparisons, and the rebuild it may start is
   detached, so the prompt is served from the report already in hand.
-- **Staleness counts the inputs, not just the clock.** Editing `known-tics.txt`
-  and upgrading basanite both leave `generated_at` exactly where it was, so a
-  report could be minutes old and describe a list you had already changed. The
-  report now records the version that built it and the list's mtime, and a
+- **Staleness now tracks the inputs, alongside the clock.** Editing
+  `known-tics.txt` and upgrading basanite both leave `generated_at` exactly
+  where it was, so a report could be minutes old and describe a list you had
+  already changed. The report now records the version that built it and the
+  list's mtime, and a
   mismatch in either counts as stale. Upgrading therefore takes effect on the
   next prompt rather than up to six days later.
 - **Attempts back off, outcomes do not.** A refresh that fails leaves the
@@ -363,8 +398,9 @@ as the message streams. You read `supporting`; the model wrote `load-bearing`.
   `report`, `trend` and `ledger` all read the transcripts, so the measurement
   stays honest whatever the screen shows. Relief, not intervention.
 - **The rung comes from `report.json`**, so the swap table maintains itself.
-  Default is curated known-tics only: a ladder is vetted for average
-  substitutability, not per-occurrence correctness, and the live report demotes
+  Default is curated known-tics only: a ladder is vetted for how well a word
+  substitutes on average across your uses, which says nothing about any one
+  occurrence, and the live report demotes
   `turn` to `change` and `five` to `figure` — fine as awareness, ruinous as a
   display rule ("it is your change to indicate figure things"). `-all` opts
   into the rest; `-words a:b` overrides.
@@ -449,8 +485,7 @@ directives, the full roster is overconstraint.
 - **`RenderHook(maxWords, maxPhrases)`**: the turn-start view now renders
   the strongest 5 word entries and 2 phrase entries (`hook -top-words` /
   `-top-phrases`; 0 = uncapped). The console `report` view still shows
-  everything — the cap is about what a model mid-task can act on, not about
-  hiding data.
+  everything — the cap only limits what a model mid-task can act on.
 - **Judge notes cut to their first sentence at render time**: the judge
   prompt has always asked for "one short clause" and the judge ignores it —
   notes ran 239–519 chars, with sentences two onward restating the ladder
@@ -461,7 +496,7 @@ directives, the full roster is overconstraint.
 
 `trend` could always show a tic's rate falling, but nothing wrote it down —
 "is basanite working?" meant eyeballing a chart and trusting memory. The
-ledger records the before/after so the answer is a lookup, not a vibe.
+ledger records the before/after so the answer is a lookup.
 
 - **`ledger` command + `internal/report` `Ledger`**: a persisted
   (`ledger.json`, beside the report) map of every flagged lemma to its
@@ -516,7 +551,7 @@ globally common ones** — the assistant-register staples that recur in Claude
 Code transcripts (`you're absolutely right`, `worth noting`, `that said`)
 plus a few iconic signatures seeded from the community "Claude Bingo" card.
 It complements the derived deterministic signals with crowd-sourced ground
-truth, and it stays a reference, not a denylist — a seeded entry still has
+truth, and it behaves as a reference — a seeded entry still has
 to be one you're actually leaning on now before it surfaces, and the output
 stays awareness, never prohibition. Niche or personal leans go in a local
 `known-tics.txt`.
@@ -574,7 +609,7 @@ non-physical contexts; literal jargon (`running` 0.34, `slot` 0.60, `hook`
 - The judge is now **on by default** when an API key is configured. The
   deterministic-only report is the one that confidently mis-suggests
   synonyms for terms of art (`hook → snare`) — the session's central
-  finding — so gating is the default experience, not an opt-in. Without a
+  finding — so gating is what runs by default now. Without a
   key, `report` falls back to deterministic rather than failing;
   `--judge=false` forces it off. The status (`judge on` / `off`) prints
   with the entry count.

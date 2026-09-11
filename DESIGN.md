@@ -43,13 +43,13 @@ meaning and a clean namespace.
    below, then injected at turn start:
    `agent (2.6× your baseline): negotiator < representative < [agent]`.
 
-The output is **awareness, not prohibition** — never "don't say X." Naming
+The output stays **awareness** — never "don't say X." Naming
 a word to suppress it is ironic-process priming and backfires. The
 swap-or-demote-or-keep decision stays with the writer.
 
 ## The two mitigations
 
-A flat WordNet synset is a synonym *set*, not a replacement — context-free,
+A flat WordNet synset is only a synonym *set* — context-free,
 often the wrong sense, not interchangeable. Two deterministic fixes:
 
 - **Mitigation A — cloze substitution against the writer's own corpus.**
@@ -68,8 +68,8 @@ often the wrong sense, not interchangeable. Two deterministic fixes:
   word-frequency fallback where no hypernym tree exists) so the set reads
   weakest → strongest. This is the real fix for the dilution problem: the
   injection becomes "you grabbed the top rung reflexively; pick the rung
-  that's actually true." Half the time the right move is demoting, not
-  swapping sideways.
+  that's actually true." Half the time the right move is demoting, rather
+  than swapping sideways.
 
 - **Freebie — variance as the signature-vs-tic discriminator.** The same
   embedding pass classifies for free: the variance of a word's use-vectors
@@ -122,10 +122,10 @@ don't creep back:
   the starvation was invisible, so "ranked below better candidates" and
   "structurally unreachable" looked identical from outside — the same shape
   as the never-firing curated entries that `basanite audit` was built for.
-  The first fix was the measurement, not the ranking: `LedgerEntry.Injected`
-  counts what reached a prompt, distinct from `Refreshes` which counts report
-  membership, and `basanite ledger` names every word that has never been
-  shown.
+  The first fix targeted the measurement, ahead of the ranking:
+  `LedgerEntry.Injected` counts what reached a prompt, distinct from
+  `Refreshes` which counts report membership, and `basanite ledger` names
+  every word that has never been shown.
 
   That turned the curated list into the control surface it was always meant
   to be: read the never-shown rows, decide whether a detected word has earned
@@ -194,11 +194,11 @@ fenced LLM cell:
 The fence is stull's `spec.Cell` (`NewConfinedCell` + `Cell.Check`), used
 **standalone** — verified from source: `package spec` imports only stdlib
 `sort`, so the Cell is a fenced-oracle library independent of stull's
-hook-statechart runtime. That runtime is the *wrong* host here (the
-judgment is build-time batch over corpus payload, not per-hook-event over
-transcript), so basanite uses stull's Cell as the fence, not its machine as
-the shell. The two ship as a coupled launch: basanite is stull's first
-public consumer of the standalone-Cell entry point.
+hook-statechart runtime. That runtime is the *wrong* host here: the
+judgment runs as one build-time batch over the whole corpus, long before any
+single hook event fires. So basanite uses stull's Cell alone, as the fence;
+its statechart machine sits unused. The two ship as a coupled launch:
+basanite is stull's first public consumer of the standalone-Cell entry point.
 
 Cost honestly stated: the judge needs Anthropic credentials at
 report/refresh time (Haiku, prompt-cached across the dozen calls, offline,
@@ -210,7 +210,7 @@ off by default; the deterministic pipeline runs unchanged without it.
 The detector so far catches tics by *shape* — a rate that rose, a word rare
 in general English, a frame that repeats. That misses two cases by
 construction, and a curated reference is the honest fix for both. The
-reference is a single **user-owned** list, not a baked-in one: what ships
+reference is a single **user-owned** list: what ships
 embedded is a *starter seed* (a conservative, high-precision sample of the
 globally common leans — the assistant-register staples that recur in Claude
 Code transcripts, plus a few iconic signatures from the "Claude Bingo" card),
@@ -219,7 +219,7 @@ read thereafter. This is the deliberate choice over a baked-in list plus a
 user override: two lists meant the seed silently re-added what the user
 deleted, so a lean could never age out — and they do age out, as the model
 underneath changes. One list the user owns lets entries accrete and fall away.
-It is a *reference*, not a denylist: a seeded entry still has to clear the
+It behaves as a *reference*: a seeded entry still has to clear the
 chronic rate and dispersion gates before it surfaces, and the output stays
 awareness, never prohibition.
 
@@ -241,9 +241,9 @@ awareness, never prohibition.
   kept — the phrase's evidence is exactly what the lemma tokenizer drops),
   surface the most-used. There is no synonym ladder for a stock phrase, so a
   phrase entry is awareness-only ("you keep reaching for this"). A fixed
-  multi-word phrase is unambiguously diction, not topic, so it needs none of
-  the leave-loudest-out / cross-project machinery the single-word risers use
-  to separate diction from domain nouns — a count floor suffices.
+  multi-word phrase is unambiguously diction rather than topic, so it needs
+  none of the leave-loudest-out / cross-project machinery the single-word
+  risers use to separate diction from domain nouns — a count floor suffices.
 
 The cost is honesty about provenance: the rest of the pipeline is *derived*
 from the corpus; the reference is *asserted* from outside it. That's why it's

@@ -107,10 +107,13 @@ func (s Swaps) Add(pairs []string) {
 
 // State carries what one message's swap needs between streaming batches.
 // MessageDisplay delivers a message in increments, so whether we are inside a
-// fenced code block is not knowable from a single delta.
+// fenced code block is not knowable from a single delta, and neither is
+// whether the delta ended mid-word or mid-fence-marker — Pending holds the
+// unresolved tail for SplitPending to prepend to the next batch.
 type State struct {
 	MessageID string `json:"message_id"`
 	InFence   bool   `json:"in_fence"`
+	Pending   string `json:"pending,omitempty"`
 }
 
 var (
@@ -126,8 +129,12 @@ var (
 // per lemma of what it replaced — the only record that the substitution
 // happened at all, since the transcript keeps the original.
 //
-// Batches end on line boundaries (except a message's last), so tracking fences
-// per line is sound.
+// Apply itself assumes it is only ever given complete lines — batches are not
+// line-aligned (Claude Code's own hooks docs say so explicitly: don't expect
+// lines to be grouped a particular way), so a caller streaming raw deltas
+// straight into Apply can split a word or a fence marker across two calls.
+// SplitPending is what makes that assumption true before Apply ever runs;
+// see runDisplay in cmd/basanite for the caller that uses it.
 func (s Swaps) Apply(delta string, st State) (string, State, map[string]int) {
 	return s.apply(delta, st, nil)
 }
@@ -147,6 +154,10 @@ func (s Swaps) apply(delta string, st State, g Glyphs) (string, State, map[strin
 	if (len(s) == 0 && len(g) == 0) || delta == "" {
 		return delta, st, counts
 	}
+	// Compiled once per call, not per line: a phrase entry has no ladder and
+	// only ever renders via glyph mode, so this is empty work whenever g has
+	// no multi-word entries.
+	phrases := phraseGlyphs(g)
 	lines := strings.Split(delta, "\n")
 	for i, line := range lines {
 		if fenceLine.MatchString(line) {
@@ -156,23 +167,34 @@ func (s Swaps) apply(delta string, st State, g Glyphs) (string, State, map[strin
 		if st.InFence {
 			continue
 		}
-		lines[i] = s.applyLine(line, counts, g)
+		lines[i] = s.applyLine(line, counts, g, phrases)
 	}
 	return strings.Join(lines, "\n"), st, counts
 }
 
-// applyLine swaps outside the protected spans of a single prose line.
-func (s Swaps) applyLine(line string, counts map[string]int, g Glyphs) string {
+// applyLine swaps outside the protected spans of a single prose line. Phrase
+// glyphs are matched first, within each non-protected segment: a phrase's
+// output is a symbol, never a letter (wordish can't match it), so running
+// the per-word pass over the result afterward is safe and touches nothing a
+// phrase already claimed.
+func (s Swaps) applyLine(line string, counts map[string]int, g Glyphs, phrases []phraseGlyph) string {
 	spans := protected.FindAllStringIndex(line, -1)
 	var b strings.Builder
 	last := 0
 	for _, sp := range spans {
-		b.WriteString(s.swapWords(line[last:sp[0]], counts, g))
+		b.WriteString(s.swapSegment(line[last:sp[0]], counts, g, phrases))
 		b.WriteString(line[sp[0]:sp[1]]) // verbatim
 		last = sp[1]
 	}
-	b.WriteString(s.swapWords(line[last:], counts, g))
+	b.WriteString(s.swapSegment(line[last:], counts, g, phrases))
 	return b.String()
+}
+
+func (s Swaps) swapSegment(seg string, counts map[string]int, g Glyphs, phrases []phraseGlyph) string {
+	if len(phrases) > 0 {
+		seg = applyPhraseGlyphs(seg, phrases, counts)
+	}
+	return s.swapWords(seg, counts, g)
 }
 
 // wordish matches a run that could be a flagged lemma, hyphens included, since

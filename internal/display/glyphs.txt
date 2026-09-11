@@ -11,6 +11,12 @@
 # anything here you'd rather see flagged than dressed up in a replacement
 # word.
 #
+# A line whose left side has a space in it is a phrase, matched verbatim
+# (case-insensitively, whitespace-collapsed) against a whole line at a time —
+# same convention known-tics.txt uses to tell a phrase from a word. A stock
+# phrase has no ladder, so glyph mode is the only display-time relief it can
+# get; word-swap skips it entirely. Example: `worth noting:∴`.
+#
 # Symbols are plain BMP marks on purpose, not emoji: emoji render double-width
 # in some terminals and single in others (breaks column alignment), and a
 # screen reader announces one by its full Unicode name where a mark like

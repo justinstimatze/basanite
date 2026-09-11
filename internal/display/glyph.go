@@ -12,12 +12,13 @@ import (
 //go:embed glyphs.txt
 var glyphSeed string
 
-// Glyphs maps a flagged lemma to a single display glyph — a narrow, plain
-// Unicode mark, not a word. Unlike Swaps, a glyph is never inflected or
-// case-matched: there is no plural or capitalization of a symbol, and no
-// vetted "demote rung" is needed, since a glyph never claims to be a
-// sense-checked synonym. A lemma present here always wins over Swaps for
-// that lemma, in swapWords.
+// Glyphs maps a flagged lemma — or a flagged phrase, its key containing a
+// space — to a single display glyph: a narrow, plain Unicode mark, not a
+// word. Unlike Swaps, a glyph is never inflected or case-matched: there is
+// no plural or capitalization of a symbol, and no vetted "demote rung" is
+// needed, since a glyph never claims to be a sense-checked synonym. A word
+// key present here always wins over Swaps for that lemma, in swapWords; a
+// phrase key has no Swaps equivalent at all — see phraseGlyphs.
 type Glyphs map[string]string
 
 // GlyphsSeed is the embedded starter table — the bytes `basanite glyphs
