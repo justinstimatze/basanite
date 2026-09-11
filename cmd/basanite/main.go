@@ -1246,42 +1246,14 @@ func runCheck(args []string) error {
 	if len(rest) == 0 {
 		return fmt.Errorf("usage: basanite check <file>|-")
 	}
-	arg := rest[0]
 
-	var body []byte
-	var err error
-	label := arg
-	if arg == "-" {
-		body, err = io.ReadAll(os.Stdin)
-		label = "stdin"
-	} else {
-		body, err = os.ReadFile(arg)
-	}
+	body, label, err := readCheckArg(rest[0])
 	if err != nil {
-		return fmt.Errorf("reading %s: %w", label, err)
+		return err
 	}
-
-	if *path == "" {
-		p, perr := report.Path()
-		if perr != nil {
-			return fmt.Errorf("no report path: %w", perr)
-		}
-		*path = p
-	}
-	rep, err := report.Load(*path)
+	rep, err := loadCheckReport(*path, *maxAge)
 	if err != nil {
-		return fmt.Errorf("loading report: %w", err)
-	}
-	if rep == nil {
-		return fmt.Errorf("no report yet — run 'basanite report' first")
-	}
-	// The same plain age check writecheck applies, loud instead of silent.
-	// staleReason answers a stricter, different question — whether the
-	// background refresh should rebuild this — and would reject a report
-	// this command's own callers (writecheck, display) accept fine, e.g. one
-	// generated moments before known-tics.txt happened to be edited.
-	if age := time.Since(rep.GeneratedAt); age > *maxAge {
-		return fmt.Errorf("report is %s old, older than -max-age %s — run 'basanite report' to refresh", age.Round(time.Second), *maxAge)
+		return err
 	}
 
 	swaps := display.FromReportForDetection(rep, *all)
@@ -1293,11 +1265,60 @@ func runCheck(args []string) error {
 	// and protected spans and matches inflected forms against the lemma
 	// table. The rewritten text is thrown away — check never edits anything.
 	_, _, counts := swaps.Apply(string(body), display.State{})
+	renderCheckResult(label, swaps, counts)
+	return nil
+}
+
+// readCheckArg reads the text to check: "-" for stdin, otherwise a file path.
+func readCheckArg(arg string) (body []byte, label string, err error) {
+	label = arg
+	if arg == "-" {
+		body, err = io.ReadAll(os.Stdin)
+		label = "stdin"
+	} else {
+		body, err = os.ReadFile(arg)
+	}
+	if err != nil {
+		return nil, label, fmt.Errorf("reading %s: %w", label, err)
+	}
+	return body, label, nil
+}
+
+// loadCheckReport resolves the report path, loads it, and applies the same
+// plain age check writecheck applies, loud instead of silent. staleReason
+// answers a stricter, different question — whether the background refresh
+// should rebuild this — and would reject a report this command's own
+// callers (writecheck, display) accept fine, e.g. one generated moments
+// before known-tics.txt happened to be edited.
+func loadCheckReport(path string, maxAge time.Duration) (*report.Report, error) {
+	if path == "" {
+		p, err := report.Path()
+		if err != nil {
+			return nil, fmt.Errorf("no report path: %w", err)
+		}
+		path = p
+	}
+	rep, err := report.Load(path)
+	if err != nil {
+		return nil, fmt.Errorf("loading report: %w", err)
+	}
+	if rep == nil {
+		return nil, fmt.Errorf("no report yet — run 'basanite report' first")
+	}
+	if age := time.Since(rep.GeneratedAt); age > maxAge {
+		return nil, fmt.Errorf("report is %s old, older than -max-age %s — run 'basanite report' to refresh", age.Round(time.Second), maxAge)
+	}
+	return rep, nil
+}
+
+// renderCheckResult prints check's plain-text verdict: clean, or one line
+// per flagged word with its rung, or "no clean substitute" when the judge
+// named none.
+func renderCheckResult(label string, swaps display.Swaps, counts map[string]int) {
 	if len(counts) == 0 {
 		fmt.Printf("basanite check: %s — clean, nothing flagged\n", label)
-		return nil
+		return
 	}
-
 	words := make([]string, 0, len(counts))
 	for w := range counts {
 		words = append(words, w)
@@ -1312,7 +1333,6 @@ func runCheck(args []string) error {
 			fmt.Printf("  %s ×%d (no clean substitute)\n", w, counts[w])
 		}
 	}
-	return nil
 }
 
 func loadSeenWords(path string) map[string]bool {
